@@ -8,7 +8,7 @@
 # release time and an incremental rebuild still takes about two seconds.
 # For the production image, see Dockerfile.
 
-FROM rust:1.98-bookworm
+FROM rust:1.99-bookworm
 
 WORKDIR /app
 ENV CARGO_TARGET_DIR=/target \

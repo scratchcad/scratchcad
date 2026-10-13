@@ -4,7 +4,7 @@
 # for those who want to run scratchcad on a server. It is not guaranteed to be secure or performant, and should be used at your own risk.
 # Please open an issue or PR if this Dockerfile does not work for you, or if you have suggestions for improvements.
 
-FROM rust:1.98-bookworm AS build
+FROM rust:1.99-bookworm AS build
 WORKDIR /src
 
 # Build dependencies first so they are cached independently of our sources.
