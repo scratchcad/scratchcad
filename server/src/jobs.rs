@@ -6,50 +6,69 @@
 //! - runs on a blocking thread, holding its slot until the work *actually*
 //!   stops, so timed-out work can never oversubscribe the CPU;
 //! - gets a [`CancelToken`] that is tripped on timeout or when the client
-//!   disconnects (the request future is dropped), which Fidget's renderers,
-//!   the mesher and our Rhai sandbox all poll.
+//!   disconnects (the request future is dropped), which our Rhai sandbox and
+//!   the renderers poll.  OpenCASCADE's own algorithms (booleans, fillets,
+//!   meshing, file export) cannot be interrupted: a job that times out inside
+//!   one stops at the next check after it returns.
 
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::Duration,
 };
 
-use fidget::render::{CancelToken, ThreadPool};
 use tokio::sync::Semaphore;
 
 use crate::error::ApiError;
+
+/// A flag that asks running work to stop; cheap to clone and share
+#[derive(Debug, Clone, Default)]
+pub struct CancelToken(Arc<AtomicBool>);
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
 
 /// What a job is doing, so that a timeout can say what ran out of time
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Stage {
     Script,
-    Evaluating,
-    Rendering,
+    /// Measuring the shape and checking that it is valid
+    Measuring,
     Meshing,
-    /// Checking a finished mesh, or diagnosing a failed one
-    Checking,
+    Rendering,
+    Exporting,
 }
 
 impl Stage {
     const ALL: [Stage; 5] = [
         Stage::Script,
-        Stage::Evaluating,
-        Stage::Rendering,
+        Stage::Measuring,
         Stage::Meshing,
-        Stage::Checking,
+        Stage::Rendering,
+        Stage::Exporting,
     ];
 
     fn describe(self) -> &'static str {
         match self {
             Stage::Script => "running the script",
-            Stage::Evaluating => "evaluating the samples",
-            Stage::Rendering => "rendering",
+            Stage::Measuring => "measuring the shape",
             Stage::Meshing => "meshing",
-            Stage::Checking => "checking the mesh",
+            Stage::Rendering => "rendering",
+            Stage::Exporting => "exporting",
         }
     }
 }
@@ -57,7 +76,6 @@ impl Stage {
 /// Context handed to a running job
 pub struct JobCtx {
     pub cancel: CancelToken,
-    pub pool: Arc<ThreadPool>,
     stage: Arc<AtomicU8>,
 }
 
@@ -73,7 +91,6 @@ pub struct Jobs {
     max_slots: usize,
     queue_timeout: Duration,
     job_timeout: Duration,
-    pool: Arc<ThreadPool>,
 }
 
 /// Cancels the token when dropped (request finished, timed out or aborted)
@@ -86,18 +103,12 @@ impl Drop for CancelOnDrop {
 }
 
 impl Jobs {
-    pub fn new(
-        max_slots: usize,
-        queue_timeout: Duration,
-        job_timeout: Duration,
-        pool: ThreadPool,
-    ) -> Self {
+    pub fn new(max_slots: usize, queue_timeout: Duration, job_timeout: Duration) -> Self {
         Self {
             slots: Arc::new(Semaphore::new(max_slots)),
             max_slots,
             queue_timeout,
             job_timeout,
-            pool: Arc::new(pool),
         }
     }
 
@@ -130,7 +141,6 @@ impl Jobs {
         let stage = Arc::new(AtomicU8::new(Stage::Script as u8));
         let ctx = JobCtx {
             cancel: cancel.clone(),
-            pool: self.pool.clone(),
             stage: stage.clone(),
         };
         let handle = tokio::task::spawn_blocking(move || {
@@ -176,7 +186,6 @@ mod tests {
             slots,
             Duration::from_millis(queue_ms),
             Duration::from_millis(job_ms),
-            ThreadPool::Global,
         )
     }
 
@@ -186,6 +195,15 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         Err(ApiError::cancelled())
+    }
+
+    #[test]
+    fn cancel_token_is_shared_between_clones() {
+        let a = CancelToken::new();
+        let b = a.clone();
+        assert!(!b.is_cancelled());
+        a.cancel();
+        assert!(b.is_cancelled());
     }
 
     #[tokio::test]

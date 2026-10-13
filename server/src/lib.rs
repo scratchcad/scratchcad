@@ -1,11 +1,15 @@
-//! HTTP API over [Fidget](https://github.com/mkeeter/fidget): run Rhai scripts,
-//! evaluate implicit surfaces, rasterize them to PNG and export STL meshes.
+//! HTTP API over [OpenCASCADE](https://dev.opencascade.org), through
+//! [scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs):
+//! run Rhai scripts that build B-rep solids, measure them, render them to PNG
+//! and export them as STEP, IGES, BREP, STL, OBJ or 3MF files.
 
 pub mod api;
 pub mod config;
 pub mod error;
+pub mod export;
+pub mod geometry;
 pub mod jobs;
-pub mod ops;
+pub mod render;
 pub mod script;
 
 use std::sync::{
@@ -54,17 +58,15 @@ impl std::ops::Deref for AppState {
 }
 
 impl AppState {
-    pub fn new(config: Config, pool: fidget::render::ThreadPool) -> Self {
+    pub fn new(config: Config) -> Self {
         let limits = ScriptLimits {
             max_operations: config.max_script_operations,
-            max_nodes: config.max_nodes,
             max_string_size: config.max_script_bytes,
         };
         let jobs = Jobs::new(
             config.max_concurrent_jobs,
             config.queue_timeout(),
             config.job_timeout(),
-            pool,
         );
         let token_hash = config
             .api_token
@@ -142,10 +144,9 @@ fn panic_response(_: Box<dyn std::any::Any + Send + 'static>) -> Response {
 pub fn router(state: AppState) -> Router {
     let v1 = Router::new()
         .route("/v1/scripts/validate", post(api::validate_script))
-        .route("/v1/eval", post(api::eval))
         .route("/v1/raster/2d", post(api::raster_2d))
         .route("/v1/raster/3d", post(api::raster_3d))
-        .route("/v1/export/stl", post(api::export_stl))
+        .route("/v1/export/{format}", post(api::export))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_token));
 
     let middleware = ServiceBuilder::new()
@@ -209,7 +210,7 @@ mod tests {
     #[test]
     fn state_starts_ready() {
         let config = <Config as clap::Parser>::parse_from(["scratchcad"]);
-        let state = AppState::new(config, fidget::render::ThreadPool::Global);
+        let state = AppState::new(config);
         assert!(!state.is_draining());
         assert!(state.token_hash.is_none());
         assert_eq!(state.jobs.active(), 0);
