@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "./api/errors";
 import { type FileEntry, listFiles } from "./api/files";
-import { mesh, validate } from "./api/scratchcad";
+import { exportShape, type ShapeSummary, validate } from "./api/scratchcad";
+import { toleranceFor } from "./lib/detail";
 import { problem, type Problem } from "./lib/problems";
-import { DEFAULT_REGION, parseRegion } from "../../src/shared/region.ts";
 
 const POLL_MS = 2000;
 const PREVIEW_DELAY_MS = 300;
@@ -61,7 +61,8 @@ export interface Preview {
   stale: boolean;
   triangles: number | null;
   computeMs: number | null;
-  nodes: number | null;
+  /** What the script last built; kept while the script has errors. */
+  shape: ShapeSummary | null;
   problems: Problem[];
 }
 
@@ -72,16 +73,17 @@ const EMPTY: Preview = {
   stale: false,
   triangles: null,
   computeMs: null,
-  nodes: null,
+  shape: null,
   problems: [],
 };
 
 /**
- * Validates and meshes the script a moment after it stops changing. `key`
- * names the document (its path): a preview for another key is never returned,
- * so switching files never shows the previous file's mesh.
+ * Validates and meshes the script a moment after it stops changing, at the
+ * mesh `detail` (see lib/detail.ts). `key` names the document (its path): a
+ * preview for another key is never returned, so switching files never shows
+ * the previous file's mesh.
  */
-export function usePreview(key: string | null, script: string | null, depth: number): Preview {
+export function usePreview(key: string | null, script: string | null, detail: number): Preview {
   const [preview, setPreview] = useState<Preview>(EMPTY);
 
   useEffect(() => {
@@ -96,22 +98,21 @@ export function usePreview(key: string | null, script: string | null, depth: num
       let checked: Awaited<ReturnType<typeof validate>> | null = null;
       try {
         checked = await validate(script, signal);
-        const region = parseRegion(script) ?? DEFAULT_REGION;
-        const result = await mesh(
-          { script, center: region.center, halfSize: region.halfSize, depth },
-          signal,
-        );
+        const tolerance = toleranceFor(detail, checked.shape.bounding_box.size);
+        const result = await exportShape("stl", { script, tolerance }, signal);
+        // Meshing repeats warnings about the shape, like having no solids.
+        const warnings = [...new Set([...checked.warnings, ...result.warnings])];
         setPreview({
           key,
           running: false,
-          stl: result.stl,
+          stl: result.data,
           stale: false,
           triangles: result.triangles,
           computeMs: result.computeMs,
-          nodes: checked.nodes,
+          shape: checked.shape,
           problems: [
             ...checked.output.map((line) => problem("info", line)),
-            ...result.warnings.map((warning) => problem("warning", warning)),
+            ...warnings.map((warning) => problem("warning", warning)),
           ],
         });
       } catch (e) {
@@ -122,9 +123,10 @@ export function usePreview(key: string | null, script: string | null, depth: num
           key,
           running: false,
           stale: p.stl !== null,
-          nodes: checked ? checked.nodes : p.nodes,
+          shape: checked ? checked.shape : p.shape,
           problems: [
             ...(checked?.output ?? []).map((line) => problem("info", line)),
+            ...(checked?.warnings ?? []).map((warning) => problem("warning", warning)),
             problem("error", message),
           ],
         }));
@@ -134,7 +136,7 @@ export function usePreview(key: string | null, script: string | null, depth: num
       clearTimeout(timer);
       controller.abort();
     };
-  }, [key, script, depth]);
+  }, [key, script, detail]);
 
   if (script === null || preview.key !== key) return { ...EMPTY, key };
   return preview;

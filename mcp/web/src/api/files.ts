@@ -1,5 +1,6 @@
 // The file API for the output directory, served by the same local process
 // (scratchcad-mcp) that serves this page.
+import type { Format } from "../../../src/shared/formats.ts";
 import { errorFrom } from "./errors";
 
 const BASE = "/api/files";
@@ -7,7 +8,9 @@ const BASE = "/api/files";
 export interface FileEntry {
   /** Relative to the output directory, with forward slashes. */
   path: string;
-  kind: "script" | "mesh";
+  kind: "script" | "export";
+  /** "rhai" for scripts, else the export's format. */
+  format: "rhai" | Format;
   bytes: number;
   /** Seconds since the epoch. */
   modified: number;
@@ -36,7 +39,8 @@ export async function readScript(path: string): Promise<{ text: string; version:
   return { text: await response.text(), version: response.headers.get("x-version") ?? "" };
 }
 
-export async function readMesh(path: string): Promise<ArrayBuffer> {
+/** An exported file's bytes, such as an STL to show. */
+export async function readExport(path: string): Promise<ArrayBuffer> {
   return (await get(path)).arrayBuffer();
 }
 

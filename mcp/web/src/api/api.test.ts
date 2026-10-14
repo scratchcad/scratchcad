@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
-import { fileUrl, listFiles, readMesh, readScript, writeFile } from "./files";
-import { mesh, validate } from "./scratchcad";
+import { fileUrl, listFiles, readExport, readScript, writeFile } from "./files";
+import { exportShape, validate } from "./scratchcad";
 
 function stubFetch(response: Response) {
   const fetch = vi.fn(async () => response);
@@ -20,53 +20,76 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const SHAPE = {
+  type: "solid",
+  solids: 1,
+  faces: 6,
+  edges: 12,
+  vertices: 8,
+  valid: true,
+  bounding_box: { min: [0, 0, 0], max: [1, 2, 3], size: [1, 2, 3] },
+  volume: 6,
+  area: 22,
+  center: [0.5, 1, 1.5],
+};
+
 describe("scratchcad", () => {
   it("validates", async () => {
-    const fetch = stubFetch(json({ nodes: 9, output: ["hi"], compile_ms: 0.5 }));
-    await expect(validate("draw(x);")).resolves.toEqual({
-      nodes: 9,
+    const fetch = stubFetch(
+      json({ shape: SHAPE, output: ["hi"], warnings: ["w"], script_ms: 0.5, measure_ms: 1 }),
+    );
+    await expect(validate("box(1, 2, 3)")).resolves.toEqual({
+      shape: SHAPE,
       output: ["hi"],
-      compileMs: 0.5,
+      warnings: ["w"],
+      scriptMs: 0.5,
     });
     expect(fetch).toHaveBeenCalledWith("/api/scratchcad/v1/scripts/validate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ script: "draw(x);" }),
+      body: JSON.stringify({ script: "box(1, 2, 3)" }),
       signal: undefined,
     });
   });
 
-  it("meshes, reading metadata from headers", async () => {
+  it("exports, reading metadata from headers", async () => {
     const fetch = stubFetch(
       new Response(new Uint8Array([1, 2, 3]), {
         headers: {
           "x-triangle-count": "12",
           "x-compute-ms": "4.5",
-          "x-warning": "the shape reaches the boundary on its -x, +x side(s)",
+          "x-mesh-tolerance": "0.01",
+          "x-warnings": JSON.stringify(["no solids, so not watertight", "second"]),
         },
       }),
     );
     const signal = new AbortController().signal;
-    const result = await mesh({ script: "s", center: [1, 2, 3], halfSize: 4, depth: 6 }, signal);
-    expect(new Uint8Array(result.stl)).toEqual(new Uint8Array([1, 2, 3]));
+    const result = await exportShape("stl", { script: "s", tolerance: 0.01 }, signal);
+    expect(new Uint8Array(result.data)).toEqual(new Uint8Array([1, 2, 3]));
     expect(result).toMatchObject({
       triangles: 12,
       computeMs: 4.5,
-      warnings: ["the shape reaches the boundary on its -x, +x side(s)"],
+      tolerance: 0.01,
+      warnings: ["no solids, so not watertight", "second"],
     });
     expect(fetch.mock.calls[0]).toEqual([
       "/api/scratchcad/v1/export/stl",
       expect.objectContaining({
-        body: JSON.stringify({ script: "s", center: [1, 2, 3], half_size: 4, depth: 6 }),
+        body: JSON.stringify({ script: "s", tolerance: 0.01 }),
         signal,
       }),
     ]);
   });
 
-  it("meshes without optional headers", async () => {
+  it("exports without optional headers", async () => {
     stubFetch(new Response(new Uint8Array()));
-    const result = await mesh({ script: "s", center: [0, 0, 0], halfSize: 1, depth: 4 });
-    expect(result).toMatchObject({ triangles: null, computeMs: null, warnings: [] });
+    const result = await exportShape("step", { script: "s" });
+    expect(result).toMatchObject({
+      triangles: null,
+      computeMs: null,
+      tolerance: null,
+      warnings: [],
+    });
   });
 
   it("throws the service's error", async () => {
@@ -90,7 +113,14 @@ describe("scratchcad", () => {
 });
 
 describe("files", () => {
-  const entry = { path: "a b/c.rhai", kind: "script", bytes: 3, modified: 1, version: "v1" };
+  const entry = {
+    path: "a b/c.rhai",
+    kind: "script",
+    format: "rhai",
+    bytes: 3,
+    modified: 1,
+    version: "v1",
+  };
 
   it("encodes each path segment", () => {
     expect(fileUrl("a b/c#.rhai")).toBe("/api/files/a%20b/c%23.rhai");
@@ -102,13 +132,13 @@ describe("files", () => {
     expect(fetch).toHaveBeenCalledWith("/api/files", { cache: "no-store", signal: undefined });
   });
 
-  it("reads scripts with their version, and meshes", async () => {
+  it("reads scripts with their version, and exports", async () => {
     stubFetch(new Response("draw(x);", { headers: { "x-version": "v2" } }));
     await expect(readScript("a.rhai")).resolves.toEqual({ text: "draw(x);", version: "v2" });
     stubFetch(new Response("no version"));
     await expect(readScript("a.rhai")).resolves.toEqual({ text: "no version", version: "" });
     stubFetch(new Response(new Uint8Array([7])));
-    expect(new Uint8Array(await readMesh("a.stl"))).toEqual(new Uint8Array([7]));
+    expect(new Uint8Array(await readExport("a.stl"))).toEqual(new Uint8Array([7]));
   });
 
   it("writes with the expected version", async () => {

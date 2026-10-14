@@ -1,10 +1,19 @@
+import type { ShapeSummary } from "../api/scratchcad";
 import type { Problem } from "../lib/problems";
 
 interface Props {
   problems: Problem[];
-  nodes: number | null;
+  shape: ShapeSummary | null;
   computeMs: number | null;
   running: boolean;
+}
+
+const fmt = (n: number) => Number(n.toPrecision(4)).toLocaleString();
+
+/** "solid, 6 faces, 10 × 20 × 30" */
+function describe(shape: ShapeSummary): string {
+  const size = shape.bounding_box.size.map(fmt).join(" × ");
+  return `${shape.type}, ${shape.faces} face${shape.faces === 1 ? "" : "s"}, ${size}`;
 }
 
 const COLORS: Record<Problem["severity"], string> = {
@@ -13,7 +22,7 @@ const COLORS: Record<Problem["severity"], string> = {
   info: "text-zinc-600 dark:text-zinc-400",
 };
 
-export function ProblemsPanel({ problems, nodes, computeMs, running }: Props) {
+export function ProblemsPanel({ problems, shape, computeMs, running }: Props) {
   const errors = problems.filter((p) => p.severity === "error").length;
   return (
     <div className="flex h-40 min-h-0 flex-col border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
@@ -23,7 +32,7 @@ export function ProblemsPanel({ problems, nodes, computeMs, running }: Props) {
           {running ? "Checking…" : errors ? `${errors} error${errors > 1 ? "s" : ""}` : "OK"}
         </span>
         <span className="ml-auto text-zinc-500 tabular-nums">
-          {nodes !== null && `${nodes.toLocaleString()} nodes`}
+          {shape !== null && describe(shape)}
           {computeMs !== null && ` · meshed in ${computeMs.toFixed(0)} ms`}
         </span>
       </div>

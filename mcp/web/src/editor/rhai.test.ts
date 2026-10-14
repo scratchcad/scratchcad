@@ -14,26 +14,34 @@ describe("rhai tokenizer", () => {
     ]);
   });
 
-  it("knows shapes, math, atoms, maps and strings", () => {
-    expect(styles('draw(sphere(#{ radius: sqrt(x) })); print("a\\"b");')).toEqual([
-      ["draw", "builtin"],
-      ["(", "bracket"],
-      ["sphere", "builtin"],
-      ["(", "bracket"],
-      ["#{", "bracket"],
-      ["radius", "variable"],
-      ["sqrt", "builtin"],
-      ["(", "bracket"],
-      ["x", "atom"],
-      [")", "bracket"],
-      ["}", "bracket"],
-      [")", "bracket"],
-      [")", "bracket"],
-      ["print", "variable"],
-      ["(", "bracket"],
-      ['"a\\"b"', "string"],
-      [")", "bracket"],
-    ]);
+  it("knows constructors, methods, atoms, maps and strings", () => {
+    expect(styles('draw(cube(s).fillet(1, ">Z")); let m = #{ on: true }; print("a\\"b");')).toEqual(
+      [
+        ["draw", "builtin"],
+        ["(", "bracket"],
+        ["cube", "builtin"],
+        ["(", "bracket"],
+        ["s", "variable"],
+        [")", "bracket"],
+        ["fillet", "builtin"],
+        ["(", "bracket"],
+        ["1", "number"],
+        ['">Z"', "string"],
+        [")", "bracket"],
+        [")", "bracket"],
+        ["let", "keyword"],
+        ["m", "variable"],
+        ["=", "operator"],
+        ["#{", "bracket"],
+        ["on", "variable"],
+        ["true", "atom"],
+        ["}", "bracket"],
+        ["print", "builtin"],
+        ["(", "bracket"],
+        ['"a\\"b"', "string"],
+        [")", "bracket"],
+      ],
+    );
   });
 
   it("handles nested block comments, chars and backtick strings", () => {
@@ -52,11 +60,13 @@ describe("rhai tokenizer", () => {
 });
 
 describe("completions", () => {
-  it("offers every shape with a snippet", () => {
+  it("offers constructors, methods and keywords", () => {
     const labels = completions.map((c) => c.label);
-    for (const name of ["sphere", "difference", "extrude_z", "draw", "sqrt", "let"]) {
+    for (const name of ["box", "cylinder", "sketch", "draw", "fillet", "faces", "arc_to", "let"]) {
       expect(labels).toContain(name);
     }
+    const types = Object.fromEntries(completions.map((c) => [c.label, c.type]));
+    expect([types.box, types.fillet, types.let]).toEqual(["function", "method", "keyword"]);
   });
 });
 

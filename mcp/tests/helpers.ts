@@ -13,16 +13,36 @@ import { createMcpServer } from "../src/tools.ts";
 
 // Smallest valid PNG header; the tools pass image bytes through untouched.
 export const PNG = Buffer.from("\x89PNG\r\n\x1a\nfake", "latin1");
-export const SCRIPT = "draw(sphere(#{ radius: 0.5 }))";
+export const SCRIPT = "box_centered(10, 20, 30)";
 export const TOOLS = [
   "validate_script",
-  "evaluate",
   "render_2d",
   "render_3d",
-  "export_stl",
+  "export",
   "save_script",
   "read_script",
 ];
+
+/** What the fake scratchcad's validate reports. */
+export const SHAPE = {
+  type: "solid",
+  solids: 1,
+  faces: 6,
+  edges: 12,
+  vertices: 8,
+  valid: true,
+  bounding_box: { min: [-5, -10, -15], max: [5, 10, 15], size: [10, 20, 30] },
+  volume: 6000,
+  area: 2200,
+  center: [0, 0, 0],
+};
+export const VALIDATED = {
+  shape: SHAPE,
+  output: ["hi"],
+  warnings: [],
+  script_ms: 0.8,
+  measure_ms: 0.2,
+};
 
 export interface Recorded {
   url: URL;
@@ -57,17 +77,38 @@ export function scratchcadError(status: number, code: string, message: string) {
 export function defaultResponse(url: URL): RawResponse {
   switch (url.pathname) {
     case "/v1/scripts/validate":
-      return response(200, { nodes: 9, output: ["hi"], compile_ms: 0.8 });
-    case "/v1/eval":
-      return response(200, { values: [-1], compute_ms: 0.02 });
+      return response(200, VALIDATED);
     case "/v1/raster/2d":
+      return response(200, PNG, {
+        "content-type": "image/png",
+        "x-compute-ms": "12.5",
+        "x-view-center": "0,0",
+        "x-view-half-size": "16.2",
+        "x-mesh-tolerance": "0.03",
+      });
     case "/v1/raster/3d":
-      return response(200, PNG, { "content-type": "image/png", "x-compute-ms": "12.5" });
+      return response(200, PNG, {
+        "content-type": "image/png",
+        "x-compute-ms": "12.5",
+        "x-view-center": "0,0,0",
+        "x-view-half-size": "21.5",
+        "x-mesh-tolerance": "0.04",
+      });
     case "/v1/export/stl":
-      return response(200, Buffer.from("solid-bytes"), {
+    case "/v1/export/obj":
+    case "/v1/export/3mf":
+      return response(200, Buffer.from("mesh-bytes"), {
         "content-type": "model/stl",
         "x-compute-ms": "40.25",
         "x-triangle-count": "1234",
+        "x-mesh-tolerance": "0.0374",
+      });
+    case "/v1/export/step":
+    case "/v1/export/iges":
+    case "/v1/export/brep":
+      return response(200, Buffer.from("ISO-10303-21;"), {
+        "content-type": "model/step",
+        "x-compute-ms": "5",
       });
     default:
       return response(404, { error: { code: "not_found", message: `no route ${url.pathname}` } });

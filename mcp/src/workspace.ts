@@ -1,16 +1,17 @@
-// The output directory as a workspace of Rhai scripts and STL meshes.
+// The output directory as a workspace of Rhai scripts and the files exported
+// from them (STEP, IGES, BREP, STL, OBJ and 3MF).
 //
-// The save_script / read_script / export_stl tools and the editor's file API
-// share these path rules: only .rhai and .stl files, only inside the output
+// The save_script / read_script / export tools and the editor's file API
+// share these path rules: only scripts and exports, only inside the output
 // directory, with symlinks followed before the check.
 import fs from "node:fs";
 import path from "node:path";
-import { formatRegion, parseRegion, type Region, setRegion } from "./shared/region.ts";
+import { EXPORT_EXTENSIONS, type Format, formatOf } from "./shared/formats.ts";
 
 export const SCRIPT = ".rhai";
-export const MESH = ".stl";
-export type Kind = "script" | "mesh";
-const KINDS: Record<string, Kind> = { [SCRIPT]: "script", [MESH]: "mesh" };
+/** Every file the workspace holds: scripts, and exports in any format. */
+export const FILES = [SCRIPT, ...EXPORT_EXTENSIONS];
+export type Kind = "script" | "export";
 
 /** A path or file the workspace refuses; the message says why. */
 export class WorkspaceError extends Error {
@@ -21,6 +22,8 @@ export interface Entry {
   /** Relative to the output directory, with forward slashes. */
   path: string;
   kind: Kind;
+  /** "rhai" for scripts, else the export format. */
+  format: "rhai" | Format;
   bytes: number;
   /** Seconds since the epoch. */
   modified: number;
@@ -62,7 +65,11 @@ export function resolve(outputDir: string, relative: string, suffixes: string[])
     throw new WorkspaceError(`path must stay inside the output directory ${root}`);
   }
   if (!suffixes.includes(path.extname(target).toLowerCase())) {
-    throw new WorkspaceError(`path must end in ${suffixes.join(" or ")}`);
+    const choices =
+      suffixes.length > 1
+        ? `${suffixes.slice(0, -1).join(", ")} or ${suffixes.at(-1)}`
+        : suffixes[0];
+    throw new WorkspaceError(`path must end in ${choices}`);
   }
   if (fs.statSync(target, { throwIfNoEntry: false })?.isDirectory()) {
     throw new WorkspaceError(`${target} is a directory`);
@@ -81,9 +88,12 @@ export function version(target: string): string {
 
 export function entry(outputDir: string, target: string): Entry {
   const stat = fs.statSync(target, { bigint: true });
+  // Workspace paths are always a script or an export.
+  const format = formatOf(target) ?? "rhai";
   return {
     path: path.relative(realpath(outputDir), target).split(path.sep).join("/"),
-    kind: KINDS[path.extname(target).toLowerCase()]!,
+    kind: format === "rhai" ? "script" : "export",
+    format,
     bytes: Number(stat.size),
     modified: Number(stat.mtimeNs) / 1e9,
     version: `${stat.mtimeNs}-${stat.size}`,
@@ -97,7 +107,7 @@ const SKIPPED_DIRS = new Set(["node_modules", "target"]);
 const MAX_DEPTH = 8;
 
 /**
- * Every script and mesh under the output directory, newest first. Hidden,
+ * Every script and export under the output directory, newest first. Hidden,
  * node_modules and target directories are skipped, as is anything nested more
  * than MAX_DEPTH directories down and symlinks that lead out of the directory.
  */
@@ -120,7 +130,7 @@ export function listFiles(outputDir: string): Entry[] {
       }
       let target: string;
       try {
-        target = resolve(root, path.relative(root, full), [SCRIPT, MESH]);
+        target = resolve(root, path.relative(root, full), FILES);
       } catch {
         continue;
       }
@@ -143,9 +153,7 @@ export function write(target: string, data: string | Buffer): void {
   }
 }
 
-/** The script with its region line replaced (or added) and one final newline. */
-export function withRegion(script: string, region: Region): string {
-  return `${setRegion(script, region).trimEnd()}\n`;
+/** The script as it is saved: with one final newline. */
+export function scriptText(script: string): string {
+  return `${script.trimEnd()}\n`;
 }
-
-export { formatRegion, parseRegion, type Region };

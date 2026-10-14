@@ -1,4 +1,5 @@
-import type { FileEntry } from "../api/files";
+import { type FileEntry, fileUrl } from "../api/files";
+import { FORMAT_INFO } from "../../../src/shared/formats.ts";
 
 interface Props {
   files: FileEntry[] | null;
@@ -36,23 +37,44 @@ function Section({
       </h2>
       {files.length === 0 && <p className="px-3 py-1 text-xs text-zinc-500">None yet</p>}
       <ul>
-        {files.map((file) => (
-          <li key={file.path}>
-            <button
-              type="button"
-              onClick={() => props.onOpen(file)}
-              aria-current={file.path === props.openPath}
-              className="block w-full px-3 py-1.5 text-left hover:bg-zinc-100 aria-[current=true]:bg-blue-100 dark:hover:bg-zinc-800 dark:aria-[current=true]:bg-blue-950"
-            >
+        {files.map((file) => {
+          const details = (
+            <>
               <span className="block truncate text-sm" title={file.path}>
                 {file.path}
               </span>
               <span className="block text-[11px] text-zinc-500">
+                {file.format !== "rhai" && `${FORMAT_INFO[file.format].label} · `}
                 {size(file.bytes)} · {ago(file.modified)}
               </span>
-            </button>
-          </li>
-        ))}
+            </>
+          );
+          const row = "block w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800";
+          return (
+            <li key={file.path}>
+              {/* Scripts and STL meshes open here; other formats download. */}
+              {file.format === "rhai" || file.format === "stl" ? (
+                <button
+                  type="button"
+                  onClick={() => props.onOpen(file)}
+                  aria-current={file.path === props.openPath}
+                  className={`${row} aria-[current=true]:bg-blue-100 dark:aria-[current=true]:bg-blue-950`}
+                >
+                  {details}
+                </button>
+              ) : (
+                <a
+                  href={fileUrl(file.path)}
+                  download={file.path.split("/").at(-1)}
+                  title={`Download ${file.path}`}
+                  className={row}
+                >
+                  {details}
+                </a>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
@@ -76,8 +98,8 @@ export function FileList({ files, error, openPath, onOpen }: Props) {
             onOpen={onOpen}
           />
           <Section
-            title="Meshes"
-            files={files.filter((f) => f.kind === "mesh")}
+            title="Exports"
+            files={files.filter((f) => f.kind === "export")}
             openPath={openPath}
             onOpen={onOpen}
           />
