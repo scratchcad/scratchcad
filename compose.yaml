@@ -1,5 +1,5 @@
-# Local development stack: the scratchcad service, and the MCP server with
-# the editor.
+# Local development stack: the scratchcad service (OpenCASCADE modelling,
+# with Debian's prebuilt OpenCASCADE 7.8), and the MCP server with the editor.
 #
 #   docker compose up --build          # start both
 #   docker compose watch               # start both and reload on source changes
@@ -7,7 +7,8 @@
 # Then point an MCP client at http://localhost:8000/mcp, e.g.
 #   claude mcp add --transport http scratchcad http://localhost:8000/mcp
 # and open the editor at http://localhost:8000. The scripts the model saves
-# (and any STL files) are in ./output.
+# (and any STEP, IGES, BREP, STL, OBJ or 3MF files exported from them) are in
+# ./output.
 #
 # The scratchcad service doesn't have to run here: the MCP server only needs
 # its URL. To use one elsewhere, run `docker compose up --no-deps mcp` with

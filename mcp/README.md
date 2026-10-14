@@ -10,13 +10,13 @@ service they call can run anywhere.
 your machine                                anywhere: local Docker, another box, the cloud
 ┌───────────────────────────────────┐       ┌──────────────────────────────┐
 │ scratchcad-mcp  (this package)    │ HTTP  │ scratchcad service (server/) │
-│  /mcp      tools for the agent    │──────▶│  validates, evaluates,       │
-│  /         the editor             │       │  renders and meshes scripts  │
-│  /api/...  files + proxy          │       │  stateless, no file access   │
-└───────────────────────────────────┘       └──────────────────────────────┘
-        │ reads and writes
+│  /mcp      tools for the agent    │──────▶│  runs scripts with           │
+│  /         the editor             │       │  OpenCASCADE: measures,      │
+│  /api/...  files + proxy          │       │  renders and exports them    │
+└───────────────────────────────────┘       │  stateless, no file access   │
+        │ reads and writes                  └──────────────────────────────┘
         ▼
-   SCRATCHCAD_MCP_OUTPUT_DIR  (.rhai scripts, .stl meshes)
+   SCRATCHCAD_MCP_OUTPUT_DIR  (.rhai scripts, and STEP, IGES, BREP, STL, OBJ, 3MF exports)
 ```
 
 It is TypeScript on Node 22.18+ (24 recommended), built with the
@@ -25,21 +25,22 @@ v2, Express, and for the editor React, Vite, Tailwind, CodeMirror and three.js.
 
 ## Tools
 
-| tool              | endpoint                    | what the model uses it for                                                                                    |
-| ----------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `validate_script` | `POST /v1/scripts/validate` | Catch Rhai errors (with line and column) before rendering                                                     |
-| `render_3d`       | `POST /v1/raster/3d`        | See the part: returns a shaded PNG as MCP image content                                                       |
-| `render_2d`       | `POST /v1/raster/2d`        | See inside the part: the cross-section at z = 0                                                               |
-| `evaluate`        | `POST /v1/eval`             | Measure exactly: field values, gradients or interval bounds                                                   |
-| `save_script`     | `POST /v1/scripts/validate` | Deliver the part: check the script, save it as `.rhai` with its region, and return a link to it in the editor |
-| `read_script`     | —                           | Read a saved script back, including the user's edits from the editor                                          |
-| `export_stl`      | `POST /v1/export/stl`       | Write a mesh to a `.stl` file, when the user asks for one                                                     |
+| tool              | endpoint                    | what the model uses it for                                                                                                          |
+| ----------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_script` | `POST /v1/scripts/validate` | Catch Rhai errors (with line and column), and measure the part: its type, validity, bounding box, volume, area, center and warnings |
+| `render_3d`       | `POST /v1/raster/3d`        | See the part: a shaded PNG with its sharp edges, as MCP image content, framed to fit unless told otherwise                          |
+| `render_2d`       | `POST /v1/raster/2d`        | See inside the part: the cross-section at z = 0                                                                                     |
+| `save_script`     | `POST /v1/scripts/validate` | Deliver the part: check the script, save it as `.rhai`, and return a link to it in the editor                                       |
+| `read_script`     | —                           | Read a saved script back, including the user's edits from the editor                                                                |
+| `export`          | `POST /v1/export/{format}`  | Write STEP, IGES, BREP, STL, OBJ or 3MF (the path's extension picks), when the user asks for a file                                 |
 
-The server's MCP `instructions` carry a scripting guide: the shape
-constructors, how `draw` works, the units, how to size the view region so parts
-aren't clipped, and the conventions below. Every parameter is documented in the
-tool schemas, and invalid or unknown arguments are rejected before any request
-is sent.
+The server's MCP `instructions` carry a scripting guide: the modelling
+functions (solids, sketches, booleans, fillets, selectors), how scripts produce
+their shape, the units and axes, how to measure and look at a part, and the
+conventions below. Every parameter is documented in the tool schemas, and
+invalid or unknown arguments are rejected before any request is sent. Renders
+say which view they used (`center` and `half_size`), so the model can keep the
+same framing or zoom in.
 
 ## Setup
 
@@ -107,20 +108,20 @@ request gets a fresh server, as the tools keep no state between calls.
 
 ## Scripts, the editor and the file API
 
-A saved script's first line records the region to mesh, so the editor (and
-anyone else) can mesh it without guessing:
+A saved script is plain Rhai. Its top-level number assignments are its
+parameters:
 
 ```rhai
-// region: center=[0, 0, 0] half_size=30
 // # Body
 let width = 20.0; // [5, 50] Width (mm)
 let holes = 4; // [1, 12] Number of holes
 ```
 
-`save_script` writes that line from its `center` and `half_size` arguments,
-keeping the script's existing one when they are left out.
+Scripts saved before scratchcad moved to OpenCASCADE start with a
+`// region: ...` line, which told the editor where to mesh an implicit
+surface. B-rep shapes need no such region; the line is only a comment now.
 
-The other lines above are parameters: top-level `let` lines assigning a number,
+These are parameters: top-level `let` lines assigning a number,
 with a `[min, max]` range and a plain-language label (with its unit) in a
 trailing comment, grouped under `// # Section` lines. The editor shows each as a
 labelled slider and rewrites only the number, keeping integers as integers. The
@@ -131,22 +132,26 @@ from the value it was saved with, which stays fixed while you drag.
 
 The editor ([`web/`](web)) shows the part across two thirds of the window and
 its parameters as sliders in the other third; the view follows the part as
-sliders change its size (Auto-fit). The file list slides out on demand, and the
-script editor (with error markers) takes the sliders' place when asked for, so
-changing dimensions never needs the script. It exports STL files and opens `?open=<path>` links, and
-talks only to this process:
+sliders change its size (Auto-fit), with +Z up as in the scripts. The file
+list slides out on demand, and the script editor (with error markers) takes
+the sliders' place when asked for, so changing dimensions never needs the
+script. It exports every format (STL files open in the view, the others
+download from the file list), sets how finely meshes follow curved surfaces as
+a fraction of the part's size, opens `?open=<path>` links, and talks only to
+this process:
 
 | route                         |                                                                                                                                                 |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/files`              | The `.rhai` and `.stl` files, newest first, each with a `version` (hidden directories are skipped)                                              |
-| `GET /api/files/<path>`       | One file, with its version in the `x-version` header                                                                                            |
+| `GET /api/files`              | The scripts and exports, newest first, each with its `kind`, `format` and `version` (hidden directories are skipped)                            |
+| `GET /api/files/<path>`       | One file, with its format's content type and its version in the `x-version` header                                                              |
 | `PUT /api/files/<path>`       | Write a file atomically. With `x-expected-version: <version>` the write is refused with 409 if the file changed since; with `new`, if it exists |
-| `POST /api/scratchcad/v1/...` | Forwarded to scratchcad's validate, eval, raster and export endpoints, with the token added                                                     |
+| `POST /api/scratchcad/v1/...` | Forwarded to scratchcad's validate, raster and export endpoints, with the token added; warnings come back as one `x-warnings` JSON array        |
 
-The file routes and the tools share one set of path rules: only `.rhai` and
-`.stl` files inside the output directory; paths that leave it (`..`, absolute
-paths elsewhere, symlinks) are refused, and tools only replace an existing file
-when the model passes `overwrite: true`. Errors use the scratchcad service's
+The file routes and the tools share one set of path rules: only scripts
+(`.rhai`) and exports (`.step`, `.stp`, `.iges`, `.igs`, `.brep`, `.brp`,
+`.stl`, `.obj`, `.3mf`) inside the output directory; paths that leave it
+(`..`, absolute paths elsewhere, symlinks) are refused, and tools only replace
+an existing file when the model passes `overwrite: true`. Errors use the scratchcad service's
 format, `{"error": {"code": ..., "message": ...}}`. When the agent rewrites a
 script the user hasn't edited, the editor reloads it; if both changed it, the
 editor asks which version to keep.
@@ -169,12 +174,15 @@ port as in production. The same checks run in the dev container:
 | directory     |                                                                                                     |
 | ------------- | --------------------------------------------------------------------------------------------------- |
 | `src/`        | The server: config, scratchcad client, tools, workspace (path rules), HTTP app, start-up            |
-| `src/shared/` | Code the server and editor share (the region line)                                                  |
+| `src/shared/` | Code the server and editor share (parameters, export formats)                                       |
 | `web/`        | The editor                                                                                          |
 | `tests/`      | Server tests: unit tests with a fake scratchcad, the HTTP app over real HTTP, and integration tests |
 
 The integration tests run against a real scratchcad binary, from
 `$SCRATCHCAD_BIN` or `../server/target/{release,debug}/scratchcad`, and are
-skipped when none has been built (CI builds one). They also run the entry point
-as a process over stdio and over HTTP, including a forged `Host` header being
-rejected.
+skipped when none has been built (CI builds one). The binary links
+OpenCASCADE dynamically, so `LD_LIBRARY_PATH` must find it (see
+[`../server/README.md`](../server/README.md)). They run the scripting guide's
+examples and the new-script template at both ends of every slider, and also
+run the entry point as a process over stdio and over HTTP, including a forged
+`Host` header being rejected.

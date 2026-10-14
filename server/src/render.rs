@@ -241,22 +241,43 @@ struct Projected {
     n: DVec3,
 }
 
-/// Clips a convex polygon to the part of view space in front of the eye
-fn clip_near(poly: &[ViewVertex], camera: &Camera) -> Vec<ViewVertex> {
+/// A triangle clipped by one plane: at most four vertices
+#[derive(Clone, Copy)]
+struct Clipped {
+    vertices: [ViewVertex; 4],
+    len: usize,
+}
+
+impl Clipped {
+    fn as_slice(&self) -> &[ViewVertex] {
+        &self.vertices[..self.len]
+    }
+}
+
+/// Clips a triangle to the part of view space in front of the eye
+fn clip_near(tri: [ViewVertex; 3], camera: &Camera) -> Clipped {
+    let mut out = Clipped {
+        vertices: [tri[0]; 4],
+        len: 0,
+    };
+    let mut push = |v: ViewVertex| {
+        out.vertices[out.len] = v;
+        out.len += 1;
+    };
     if camera.perspective == 0.0 {
-        return poly.to_vec();
+        tri.into_iter().for_each(push);
+        return out;
     }
     let dist = |p: &ViewVertex| camera.w(p.v) - NEAR_W;
-    let mut out = Vec::with_capacity(poly.len() + 1);
-    for (i, a) in poly.iter().enumerate() {
-        let b = &poly[(i + 1) % poly.len()];
+    for (i, a) in tri.iter().enumerate() {
+        let b = &tri[(i + 1) % 3];
         let (da, db) = (dist(a), dist(b));
         if da >= 0.0 {
-            out.push(*a);
+            push(*a);
         }
         if (da >= 0.0) != (db >= 0.0) {
             let t = da / (da - db);
-            out.push(ViewVertex {
+            push(ViewVertex {
                 v: a.v.lerp(b.v, t),
                 n: a.n.lerp(b.n, t),
             });
@@ -456,15 +477,19 @@ pub fn render_3d(
             }
             visited = 0;
         }
-        let poly = clip_near(&[vertex(tri[0]), vertex(tri[1]), vertex(tri[2])], camera);
-        let projected: Vec<Projected> =
-            poly.iter().map(|p| project(p, camera, &frame.px)).collect();
-        for k in 1..projected.len().saturating_sub(1) {
-            visited += rasterize(
-                &mut frame,
-                [projected[0], projected[k], projected[k + 1]],
-                view.mode,
-            );
+        let clipped = clip_near([vertex(tri[0]), vertex(tri[1]), vertex(tri[2])], camera);
+        let poly = clipped.as_slice();
+        if poly.len() < 3 {
+            continue;
+        }
+        // A fan of triangles over the clipped polygon
+        let px = frame.px;
+        let first = project(&poly[0], camera, &px);
+        let mut previous = project(&poly[1], camera, &px);
+        for vertex in &poly[2..] {
+            let next = project(vertex, camera, &px);
+            visited += rasterize(&mut frame, [first, previous, next], view.mode);
+            previous = next;
         }
     }
 
@@ -896,7 +921,21 @@ mod tests {
         let [a, _] = clip_segment([at(3.0), at(0.0)], &camera).unwrap();
         assert!((a.v.z - (1.0 - NEAR_W)).abs() < 1e-12);
         let orthographic = Camera::new(DVec3::ZERO, 1.0, &Rotation::default(), 0.0);
-        assert_eq!(clip_near(&[at(5.0)], &orthographic).len(), 1);
+        assert_eq!(clip_near([at(5.0); 3], &orthographic).len, 3);
+        // One corner behind the eye: the rest is a quadrilateral
+        let quad = clip_near(
+            [
+                at(0.0),
+                at(5.0),
+                ViewVertex {
+                    v: DVec3::X,
+                    ..at(0.0)
+                },
+            ],
+            &camera,
+        );
+        assert_eq!(quad.len, 4);
+        assert_eq!(clip_near([at(5.0); 3], &camera).as_slice().len(), 0);
     }
 
     #[test]

@@ -9,7 +9,7 @@ import {
   stableRanges,
 } from "../src/shared/params.ts";
 
-const SCRIPT = `// region: center=[0, 0, 0] half_size=40
+const SCRIPT = `// A bolt, near enough
 // # Thread
 let thread_length = 26.0; // [10, 60] Thread length (mm)
 let blade_count = 29; // [3, 60] Number of blades
@@ -19,7 +19,7 @@ let flat = 0;  //   just a label
   let indented = 3.0;
 let expr = 2.0 * 3.0;
 let name = "bolt";
-draw(sphere(#{ radius: thread_length }));
+draw(cylinder(thread_length / 4.0, thread_length));
 `;
 
 describe("parseParams", () => {
