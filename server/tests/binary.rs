@@ -117,10 +117,10 @@ fn serves_and_shuts_down_on_sigterm() {
 fn text_logs_auth_and_sigint() {
     let (mut child, rx) = spawn(&[
         ("SCRATCHCAD_API_TOKEN", "0123456789abcdef"),
-        ("SCRATCHCAD_RENDER_THREADS", "2"),
+        ("SCRATCHCAD_MAX_CONCURRENT_JOBS", "2"),
     ]);
     let line = wait_for(&rx, "listening");
-    assert!(line.contains("render_threads=2"), "{line}");
+    assert!(line.contains("max_concurrent_jobs=2"), "{line}");
     assert!(line.contains("auth=true"), "{line}");
     let addr = line
         .split("addr=")
@@ -142,7 +142,7 @@ fn text_logs_auth_and_sigint() {
 #[test]
 fn invalid_config_fails_fast() {
     let mut child = command()
-        .args(["--max-nodes", "0"])
+        .args(["--max-mesh-triangles", "0"])
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
@@ -155,7 +155,10 @@ fn invalid_config_fails_fast() {
         .unwrap()
         .read_to_string(&mut err)
         .unwrap();
-    assert!(err.contains("max_nodes must be at least 1"), "{err}");
+    assert!(
+        err.contains("max_mesh_triangles must be at least 1"),
+        "{err}"
+    );
 
     // Unbindable address
     let (mut child, _rx) = spawn(&[("SCRATCHCAD_LISTEN", "203.0.113.1:1")]);

@@ -5,31 +5,22 @@ use scratchcad::{
     AppState,
     config::{Config, LogFormat},
 };
+use scratchcad_occt_rhai::{MessageLevel, set_message_handler};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::parse();
     config.validate()?;
     init_tracing(config.log_format);
-
-    // Dedicated Rayon pool for Fidget, sized independently of Tokio's workers.
-    let threads = config
-        .render_threads
-        .map(|n| n.get())
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(|i| format!("fidget-{i}"))
-        .build()?;
+    // OpenCASCADE prints to stdout, which carries our logs. Route its messages
+    // through tracing instead; this swaps its printer, so do it before any
+    // thread can be using OpenCASCADE.
+    set_message_handler(MessageLevel::Warning, log_occt_message);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let result = rt.block_on(serve(
-        config,
-        fidget::render::ThreadPool::Custom(pool),
-        threads,
-    ));
+    let result = rt.block_on(serve(config));
     // Abandoned blocking jobs have been cancelled and normally stop quickly;
     // never let a stuck one hold the process open indefinitely.
     rt.shutdown_timeout(Duration::from_secs(5));
@@ -37,15 +28,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     result
 }
 
-async fn serve(
-    config: Config,
-    pool: fidget::render::ThreadPool,
-    threads: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+/// Logs one of OpenCASCADE's messages (warnings and worse)
+fn log_occt_message(level: MessageLevel, text: &str) {
+    let text = text.trim();
+    match level {
+        MessageLevel::Fail => tracing::error!(target: "occt", "{text}"),
+        _ => tracing::warn!(target: "occt", "{text}"),
+    }
+}
+
+async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
-        render_threads = threads,
         max_concurrent_jobs = config.max_concurrent_jobs,
         auth = config.api_token.is_some(),
         "listening"
@@ -54,7 +49,7 @@ async fn serve(
         tracing::warn!("SCRATCHCAD_API_TOKEN is not set; the API is unauthenticated");
     }
 
-    let state = AppState::new(config, pool);
+    let state = AppState::new(config);
     let app = scratchcad::router(state.clone());
 
     let drain = state.clone();

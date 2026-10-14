@@ -29,8 +29,9 @@ pub enum ApiError {
     #[error("request body too large")]
     PayloadTooLarge,
 
-    #[error("not found")]
-    NotFound,
+    /// The message says what was not found
+    #[error("{0}")]
+    NotFound(String),
 
     #[error("missing or invalid bearer token")]
     Unauthorized,
@@ -38,19 +39,17 @@ pub enum ApiError {
     #[error("server is at capacity, retry later")]
     Overloaded,
 
-    /// The field is NaN or infinite at a point the mesher sampled
-    #[error("{0}")]
-    NonFiniteField(String),
-
-    /// Meshing produced no triangles
+    /// Meshing produced no triangles (the shape has no faces)
     #[error("{0}")]
     EmptyMesh(String),
 
-    /// The mesher panicked for a reason the server could not identify.  Unlike
-    /// [`Internal`](Self::Internal), the message is passed on: it is the
-    /// mesher's own assertion text plus what the server checked.
+    /// OpenCASCADE could not mesh the shape.  The message is OpenCASCADE's.
     #[error("{0}")]
     MeshFailed(String),
+
+    /// OpenCASCADE could not convert the shape to the requested format
+    #[error("{0}")]
+    ExportFailed(String),
 
     /// The message says which stage was running and the budget it exceeded
     #[error("{0}")]
@@ -72,7 +71,7 @@ struct Inner<'a> {
 }
 
 impl ApiError {
-    /// Work stopped because its [`CancelToken`](fidget::render::CancelToken)
+    /// Work stopped because its [`CancelToken`](scratchcad_occt_rhai::CancelToken)
     /// was tripped.  When that was the job budget, [`Jobs`](crate::jobs::Jobs)
     /// replaces this with a message naming the stage that ran out of time.
     pub fn cancelled() -> Self {
@@ -87,12 +86,12 @@ impl ApiError {
             Self::Script(_) => (StatusCode::UNPROCESSABLE_ENTITY, "script_error"),
             Self::LimitExceeded(_) => (StatusCode::UNPROCESSABLE_ENTITY, "limit_exceeded"),
             Self::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
-            Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            Self::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Overloaded => (StatusCode::SERVICE_UNAVAILABLE, "overloaded"),
-            Self::NonFiniteField(_) => (StatusCode::UNPROCESSABLE_ENTITY, "non_finite_field"),
             Self::EmptyMesh(_) => (StatusCode::UNPROCESSABLE_ENTITY, "empty_mesh"),
-            Self::MeshFailed(_) => (StatusCode::INTERNAL_SERVER_ERROR, "mesh_failed"),
+            Self::MeshFailed(_) => (StatusCode::UNPROCESSABLE_ENTITY, "mesh_failed"),
+            Self::ExportFailed(_) => (StatusCode::UNPROCESSABLE_ENTITY, "export_failed"),
             Self::Timeout(_) => (StatusCode::GATEWAY_TIMEOUT, "timeout"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
@@ -102,11 +101,9 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = self.status_and_code();
-        match &self {
-            // Details stay in the logs; clients only see a generic message.
-            Self::Internal(detail) => tracing::error!(%detail, "internal error"),
-            Self::MeshFailed(detail) => tracing::error!(%detail, "mesher failed"),
-            _ => {}
+        // Details stay in the logs; clients only see a generic message.
+        if let Self::Internal(detail) = &self {
+            tracing::error!(%detail, "internal error");
         }
         let body = Body {
             error: Inner {
@@ -176,16 +173,12 @@ mod tests {
             (ApiError::Script("m".into()), 422, "script_error"),
             (ApiError::LimitExceeded("m".into()), 422, "limit_exceeded"),
             (ApiError::PayloadTooLarge, 413, "payload_too_large"),
-            (ApiError::NotFound, 404, "not_found"),
+            (ApiError::NotFound("m".into()), 404, "not_found"),
             (ApiError::Unauthorized, 401, "unauthorized"),
             (ApiError::Overloaded, 503, "overloaded"),
-            (
-                ApiError::NonFiniteField("m".into()),
-                422,
-                "non_finite_field",
-            ),
             (ApiError::EmptyMesh("m".into()), 422, "empty_mesh"),
-            (ApiError::MeshFailed("m".into()), 500, "mesh_failed"),
+            (ApiError::MeshFailed("m".into()), 422, "mesh_failed"),
+            (ApiError::ExportFailed("m".into()), 422, "export_failed"),
             (ApiError::Timeout("m".into()), 504, "timeout"),
             (ApiError::Internal("m".into()), 500, "internal"),
         ];
@@ -207,8 +200,10 @@ mod tests {
         assert_eq!(v["error"]["message"], "script error: line 3: oops");
         let (_, _, v) = render(ApiError::Timeout("meshing ran out".into())).await;
         assert_eq!(v["error"]["message"], "meshing ran out");
-        let (_, _, v) = render(ApiError::MeshFailed("assertion failed: x".into())).await;
-        assert_eq!(v["error"]["message"], "assertion failed: x");
+        let (_, _, v) = render(ApiError::MeshFailed("meshing failed".into())).await;
+        assert_eq!(v["error"]["message"], "meshing failed");
+        let (_, _, v) = render(ApiError::NotFound("no such format".into())).await;
+        assert_eq!(v["error"]["message"], "no such format");
         let (_, _, v) = render(ApiError::Internal("secret path /etc".into())).await;
         assert_eq!(v["error"]["message"], "internal error");
     }

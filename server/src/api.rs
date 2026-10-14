@@ -1,32 +1,39 @@
 //! HTTP handlers and request / response types for `/v1`
 //!
-//! The API is stateless: every request carries its Rhai script, which is
-//! executed in the sandbox and then evaluated, rendered or meshed.
+//! The API is stateless: every request carries its Rhai script, which is run
+//! in the sandbox and its shape then measured, rendered or exported.  All of
+//! that happens inside one job, because shapes cannot leave the thread they
+//! were made on; jobs hand back bytes or plain data.
 
 use std::time::Instant;
 
 use axum::{
     Json,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use fidget::render::{ImageSize, VoxelSize};
-use nalgebra::{Matrix3, Matrix4, Rotation3, Scale2, Scale3, Translation2, Translation3, Vector3};
+use scratchcad_occt_rhai::{DVec2, DVec3, Shape};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     AppState,
     error::{ApiError, ApiJson},
+    export::{self, ExportFormat},
     jobs::{JobCtx, Stage},
-    ops::{self, Evaluator, Mode2d, Mode3d},
+    measure::{self, ShapeSummary},
+    mesh,
+    render::{self, Camera, Mode2d, Mode3d, Rotation, View2d, View3d},
     script::{self, Compiled},
 };
 
 const X_COMPUTE_MS: HeaderName = HeaderName::from_static("x-compute-ms");
 const X_TRIANGLES: HeaderName = HeaderName::from_static("x-triangle-count");
+const X_TOLERANCE: HeaderName = HeaderName::from_static("x-mesh-tolerance");
+const X_VIEW_CENTER: HeaderName = HeaderName::from_static("x-view-center");
+const X_VIEW_HALF_SIZE: HeaderName = HeaderName::from_static("x-view-half-size");
 /// One per warning: the request succeeded, but the result may not be what
-/// the caller intended (for example a mesh cut open at the region boundary)
+/// the caller intended (for example a section plane that misses the part)
 const X_WARNING: HeaderName = HeaderName::from_static("x-warning");
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -48,7 +55,7 @@ fn compile(state: &AppState, src: &str, ctx: &JobCtx) -> Result<Compiled, ApiErr
     script::compile(src, &state.limits, &ctx.cancel)
 }
 
-pub(crate) fn finite<const N: usize>(name: &str, v: &[f32; N]) -> Result<(), ApiError> {
+pub(crate) fn finite<const N: usize>(name: &str, v: &[f64; N]) -> Result<(), ApiError> {
     if v.iter().all(|x| x.is_finite()) {
         Ok(())
     } else {
@@ -56,7 +63,7 @@ pub(crate) fn finite<const N: usize>(name: &str, v: &[f32; N]) -> Result<(), Api
     }
 }
 
-pub(crate) fn positive(name: &str, v: f32) -> Result<(), ApiError> {
+pub(crate) fn positive(name: &str, v: f64) -> Result<(), ApiError> {
     if v.is_finite() && v > 0.0 {
         Ok(())
     } else {
@@ -84,6 +91,11 @@ fn ms_header(ms: f64) -> HeaderValue {
     HeaderValue::from_str(&format!("{ms:.3}")).expect("number is a valid header")
 }
 
+fn number_header(values: &[f64]) -> HeaderValue {
+    let text: Vec<String> = values.iter().map(|v| format!("{v}")).collect();
+    HeaderValue::from_str(&text.join(",")).expect("numbers are a valid header")
+}
+
 fn add_warnings(headers: &mut HeaderMap, warnings: &[String]) {
     for w in warnings {
         // Header values must be visible ASCII; warnings are written that way,
@@ -103,39 +115,9 @@ fn add_warnings(headers: &mut HeaderMap, warnings: &[String]) {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Transforms
-
-/// Maps the renderer's `[-1, 1]` square onto `center ± half_size`
-pub(crate) fn transform_2d(center: [f32; 2], half_size: f32) -> Matrix3<f32> {
-    Translation2::new(center[0], center[1]).to_homogeneous()
-        * Scale2::new(half_size, half_size).to_homogeneous()
-}
-
-/// Maps the renderer's / mesher's `[-1, 1]` cube onto `center ± half_size`
-pub(crate) fn transform_3d(center: [f32; 3], half_size: f32) -> Matrix4<f32> {
-    Translation3::new(center[0], center[1], center[2]).to_homogeneous()
-        * Scale3::new(half_size, half_size, half_size).to_homogeneous()
-}
-
-/// Camera transform for 3D rendering: rotation (degrees) and perspective,
-/// composed in the same order as Fidget's CLI demo
-pub(crate) fn camera_3d(
-    center: [f32; 3],
-    half_size: f32,
-    rotation: &Rotation,
-    perspective: f32,
-) -> Matrix4<f32> {
-    let rot =
-        |axis: Vector3<f32>, deg: f32| Rotation3::new(axis * deg.to_radians()).to_homogeneous();
-    let mut camera = Matrix4::identity();
-    camera[(3, 2)] = perspective;
-    Translation3::new(center[0], center[1], center[2]).to_homogeneous()
-        * rot(Vector3::y(), rotation.yaw)
-        * rot(Vector3::z(), rotation.roll)
-        * rot(Vector3::x(), rotation.pitch)
-        * Scale3::new(half_size, half_size, half_size).to_homogeneous()
-        * camera
+/// The diagonal of the shape's bounding box, which mesh tolerances scale with
+fn diagonal(bbox: &scratchcad_occt_rhai::BoundingBox) -> f64 {
+    bbox.size().length()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -149,157 +131,37 @@ pub struct ValidateRequest {
 
 #[derive(Serialize)]
 pub struct ValidateResponse {
-    /// Unique nodes in the compiled math graph
-    nodes: usize,
+    shape: ShapeSummary,
     /// `print` / `debug` output from the script
     output: Vec<String>,
-    compile_ms: f64,
+    /// Problems with the shape that will cause trouble later
+    warnings: Vec<String>,
+    script_ms: f64,
+    measure_ms: f64,
 }
 
-/// `POST /v1/scripts/validate` — run a script and report on the shape it
-/// produces, without evaluating it.  Nothing is stored.
+/// `POST /v1/scripts/validate` — run a script and describe the shape it
+/// produces.  Nothing is stored.
 pub async fn validate_script(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<ValidateRequest>,
 ) -> Result<Json<ValidateResponse>, ApiError> {
     check_script_len(&state, &req.script)?;
     let st = state.clone();
-    let c = state
-        .jobs
-        .run(move |ctx| compile(&st, &req.script, ctx))
-        .await?;
-    Ok(Json(ValidateResponse {
-        nodes: c.nodes,
-        output: c.output,
-        compile_ms: c.compile_ms,
-    }))
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Evaluation
-
-#[derive(Deserialize, Default, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum EvalMode {
-    /// Distance-field value at each point
-    #[default]
-    Value,
-    /// Value plus the gradient `[dx, dy, dz]` at each point
-    Gradient,
-    /// Conservative `[lower, upper]` bounds over each box
-    Interval,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EvalRequest {
-    script: String,
-    #[serde(default)]
-    evaluator: Evaluator,
-    #[serde(default)]
-    mode: EvalMode,
-    /// `[x, y, z]` sample positions (value / gradient modes)
-    #[serde(default)]
-    points: Vec<[f32; 3]>,
-    /// `[[xmin, xmax], [ymin, ymax], [zmin, zmax]]` boxes (interval mode)
-    #[serde(default)]
-    intervals: Vec<[[f32; 2]; 3]>,
-}
-
-impl EvalRequest {
-    /// Checks the samples against the mode and limits; returns their count
-    fn validate(&self, max: usize) -> Result<usize, ApiError> {
-        let n = match self.mode {
-            EvalMode::Value | EvalMode::Gradient => {
-                if !self.intervals.is_empty() {
-                    return Err(ApiError::BadRequest(
-                        "`intervals` is only valid with `mode: \"interval\"`".into(),
-                    ));
-                }
-                for p in &self.points {
-                    finite("points", p)?;
-                }
-                self.points.len()
-            }
-            EvalMode::Interval => {
-                if !self.points.is_empty() {
-                    return Err(ApiError::BadRequest(
-                        "`points` is not valid with `mode: \"interval\"`".into(),
-                    ));
-                }
-                for [lo, hi] in self.intervals.iter().flatten() {
-                    if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
-                        return Err(ApiError::BadRequest(
-                            "each interval must be finite with lower <= upper".into(),
-                        ));
-                    }
-                }
-                self.intervals.len()
-            }
-        };
-        if n == 0 {
-            return Err(ApiError::BadRequest("nothing to evaluate".into()));
-        }
-        if n > max {
-            return Err(ApiError::LimitExceeded(format!(
-                "{n} samples requested; the limit is {max}"
-            )));
-        }
-        Ok(n)
-    }
-}
-
-#[derive(Serialize, Default)]
-pub struct EvalResponse {
-    /// Values per point; non-finite results are reported as `null`
-    #[serde(skip_serializing_if = "Option::is_none")]
-    values: Option<Vec<f32>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gradients: Option<Vec<[f32; 3]>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    intervals: Option<Vec<[f32; 2]>>,
-    compute_ms: f64,
-}
-
-/// `POST /v1/eval` — evaluate the shape at points or over boxes
-pub async fn eval(
-    State(state): State<AppState>,
-    ApiJson(req): ApiJson<EvalRequest>,
-) -> Result<Json<EvalResponse>, ApiError> {
-    req.validate(state.config.max_eval_points)?;
-    check_script_len(&state, &req.script)?;
-
-    let st = state.clone();
     let out = state
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
-            ctx.set_stage(Stage::Evaluating);
+            ctx.set_stage(Stage::Measuring);
             let start = Instant::now();
-            let mut out = EvalResponse::default();
-            match req.mode {
-                EvalMode::Value => {
-                    out.values = Some(ops::dispatch(
-                        req.evaluator,
-                        &c,
-                        ops::PointEval(req.points),
-                    )?);
-                }
-                EvalMode::Gradient => {
-                    let g = ops::dispatch(req.evaluator, &c, ops::GradEval(req.points))?;
-                    out.values = Some(g.iter().map(|g| g.v).collect());
-                    out.gradients = Some(g.iter().map(|g| [g.dx, g.dy, g.dz]).collect());
-                }
-                EvalMode::Interval => {
-                    out.intervals = Some(ops::dispatch(
-                        req.evaluator,
-                        &c,
-                        ops::IntervalEval(req.intervals),
-                    )?);
-                }
-            }
-            out.compute_ms = ms_since(start);
-            Ok(out)
+            let (shape, warnings) = measure::summarize(&c.shape)?;
+            Ok(ValidateResponse {
+                shape,
+                output: c.output,
+                warnings,
+                script_ms: c.script_ms,
+                measure_ms: ms_since(start),
+            })
         })
         .await?;
     Ok(Json(out))
@@ -308,34 +170,43 @@ pub async fn eval(
 ////////////////////////////////////////////////////////////////////////////////
 // Rasterization
 
-fn default_half_size() -> f32 {
-    1.0
-}
-
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Raster2dRequest {
     script: String,
-    #[serde(default)]
-    evaluator: Evaluator,
     width: u32,
     height: u32,
     #[serde(default)]
     mode: Mode2d,
-    /// Model-space point at the center of the image
-    #[serde(default)]
-    center: [f32; 2],
-    /// Half of the visible model-space extent (the view spans
-    /// `center ± half_size` along the image's longer axis)
-    #[serde(default = "default_half_size")]
-    half_size: f32,
+    /// Model-space point at the center of the image; defaults to the middle
+    /// of the shape's bounding box
+    center: Option<[f64; 2]>,
+    /// Half of the visible model-space extent along the image's longer
+    /// axis; defaults to just enough to show the bounding box
+    half_size: Option<f64>,
 }
 
-/// `POST /v1/raster/2d` — render a 2D slice (z = 0) to PNG
+fn png_response(rendered: Rendered, ms: f64) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+    headers.insert(X_COMPUTE_MS, ms_header(ms));
+    headers.insert(X_VIEW_CENTER, number_header(&rendered.center));
+    headers.insert(X_VIEW_HALF_SIZE, number_header(&[rendered.half_size]));
+    headers.insert(X_TOLERANCE, number_header(&[rendered.tolerance]));
+    add_warnings(&mut headers, &rendered.warnings);
+    (headers, rendered.png).into_response()
+}
+
+/// A render, and how it was made
+struct Rendered {
+    png: Vec<u8>,
+    center: Vec<f64>,
+    half_size: f64,
+    tolerance: f64,
+    warnings: Vec<String>,
+}
+
+/// `POST /v1/raster/2d` — render the cross-section at z = 0 to PNG
 pub async fn raster_2d(
     State(state): State<AppState>,
     ApiJson(req): ApiJson<Raster2dRequest>,
@@ -345,77 +216,96 @@ pub async fn raster_2d(
         dim("width", req.width, max)?,
         dim("height", req.height, max)?,
     );
-    finite("center", &req.center)?;
-    positive("half_size", req.half_size)?;
+    if let Some(c) = &req.center {
+        finite("center", c)?;
+    }
+    if let Some(h) = req.half_size {
+        positive("half_size", h)?;
+    }
     check_script_len(&state, &req.script)?;
-    let world_to_model = transform_2d(req.center, req.half_size);
 
     let st = state.clone();
-    let (png, warnings, ms) = state
+    let (rendered, ms) = state
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
-            ctx.set_stage(Stage::Rendering);
             let start = Instant::now();
-            let out = ops::dispatch(
-                req.evaluator,
-                &c,
-                ops::Raster2d {
-                    size: ImageSize::new(w, h),
-                    mode: req.mode,
-                    world_to_model,
-                    pool: &ctx.pool,
-                    cancel: ctx.cancel.clone(),
+            ctx.set_stage(Stage::Measuring);
+            let bbox = measure::bounding_box(&c.shape)?;
+            let view = View2d::framing(
+                &bbox,
+                (w, h),
+                req.mode,
+                req.center.map(DVec2::from_array),
+                req.half_size,
+            );
+            let mut warnings = vec![];
+            let pixel = 2.0 * view.half_size / f64::from(w.max(h));
+            let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
+            let segments = if bbox.min.z > 0.0 || bbox.max.z < 0.0 {
+                warnings.push(format!(
+                    "the plane z = 0 misses the part, which spans z = {:.6} to {:.6}; \
+                     translate it in the script to see a section",
+                    bbox.min.z, bbox.max.z
+                ));
+                vec![]
+            } else {
+                ctx.set_stage(Stage::Meshing);
+                let welded =
+                    mesh::mesh(&c.shape, tolerance, st.config.max_mesh_triangles)?.welded();
+                let segments = render::section(&welded);
+                if segments.is_empty() {
+                    warnings.push(format!(
+                        "the section at z = 0 is empty: the part spans z = {:.6} to {:.6} \
+                         but has no faces that cross the plane",
+                        bbox.min.z, bbox.max.z
+                    ));
+                }
+                segments
+            };
+            ctx.set_stage(Stage::Rendering);
+            let png = render::encode_png(&render::render_2d(&view, &segments), w, h)?;
+            Ok((
+                Rendered {
+                    png,
+                    center: view.center.to_array().to_vec(),
+                    half_size: view.half_size,
+                    tolerance,
+                    warnings,
                 },
-            )?;
-            let png = ops::encode_png(&out.rgba, w, h)?;
-            Ok((png, out.warnings, ms_since(start)))
+                ms_since(start),
+            ))
         })
         .await?;
-    Ok(png_response(png, &warnings, ms))
+    Ok(png_response(rendered, ms))
 }
 
-#[derive(Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct Rotation {
-    /// Degrees about the Y axis
-    #[serde(default)]
-    pub yaw: f32,
-    /// Degrees about the X axis
-    #[serde(default)]
-    pub pitch: f32,
-    /// Degrees about the Z axis
-    #[serde(default)]
-    pub roll: f32,
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Raster3dRequest {
     script: String,
-    #[serde(default)]
-    evaluator: Evaluator,
     width: u32,
     height: u32,
-    /// Voxels along the view axis; defaults to `max(width, height)`
-    depth: Option<u32>,
     #[serde(default)]
     mode: Mode3d,
-    /// Smooth noisy normals (ignored for `heightmap`)
+    /// Draw the sharp edges (shaded and normals modes)
     #[serde(default = "default_true")]
-    denoise: bool,
-    /// Screen-space ambient occlusion (only for `shaded`)
-    #[serde(default)]
-    ssao: bool,
-    #[serde(default)]
-    center: [f32; 3],
-    #[serde(default = "default_half_size")]
-    half_size: f32,
+    edges: bool,
+    /// Model-space point at the center of the view; defaults to the middle
+    /// of the shape's bounding box
+    center: Option<[f64; 3]>,
+    /// The view spans `center ± half_size` along the image's longer axis;
+    /// defaults to just enough to show the whole bounding box
+    half_size: Option<f64>,
     #[serde(default)]
     rotation: Rotation,
     /// Perspective strength; 0 is orthographic
     #[serde(default)]
-    perspective: f32,
+    perspective: f64,
 }
 
 /// `POST /v1/raster/3d` — render a 3D view to PNG
@@ -428,138 +318,225 @@ pub async fn raster_3d(
         dim("width", req.width, max)?,
         dim("height", req.height, max)?,
     );
-    let d = dim("depth", req.depth.unwrap_or(w.max(h)), max)?;
-    finite("center", &req.center)?;
-    positive("half_size", req.half_size)?;
-    let r = &req.rotation;
+    if let Some(c) = &req.center {
+        finite("center", c)?;
+    }
+    if let Some(h) = req.half_size {
+        positive("half_size", h)?;
+    }
+    let r = req.rotation;
     finite("rotation", &[r.yaw, r.pitch, r.roll])?;
     if !(0.0..=1.0).contains(&req.perspective) {
         return Err(ApiError::BadRequest(
             "`perspective` must be in 0..=1".into(),
         ));
     }
-    if req.ssao && req.mode != Mode3d::Shaded {
-        return Err(ApiError::BadRequest(
-            "`ssao` requires `mode: \"shaded\"`".into(),
-        ));
-    }
     check_script_len(&state, &req.script)?;
-    let world_to_model = camera_3d(req.center, req.half_size, r, req.perspective);
 
     let st = state.clone();
-    let (png, warnings, ms) = state
+    let (rendered, ms) = state
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
-            ctx.set_stage(Stage::Rendering);
             let start = Instant::now();
-            let out = ops::dispatch(
-                req.evaluator,
-                &c,
-                ops::Raster3d {
-                    size: VoxelSize::new(w, h, d),
-                    mode: req.mode,
-                    denoise: req.denoise,
-                    ssao: req.ssao,
-                    world_to_model,
-                    pool: &ctx.pool,
-                    cancel: ctx.cancel.clone(),
+            ctx.set_stage(Stage::Measuring);
+            let bbox = measure::bounding_box(&c.shape)?;
+            let camera = Camera::framing(
+                &bbox,
+                (w, h),
+                &req.rotation,
+                req.perspective,
+                req.center.map(DVec3::from_array),
+                req.half_size,
+            );
+            let pixel = 2.0 * camera.half_size / f64::from(w.max(h));
+            let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
+            ctx.set_stage(Stage::Meshing);
+            let scene = scene(&c.shape, tolerance, st.config.max_mesh_triangles, req.edges)?;
+            ctx.set_stage(Stage::Rendering);
+            let view = View3d {
+                width: w,
+                height: h,
+                mode: req.mode,
+                camera,
+            };
+            let rgba = render::render_3d(&view, &scene.mesh, &scene.lines, &bbox, &ctx.cancel)?;
+            let png = render::encode_png(&rgba, w, h)?;
+            Ok((
+                Rendered {
+                    png,
+                    center: view.camera.center.to_array().to_vec(),
+                    half_size: view.camera.half_size,
+                    tolerance,
+                    warnings: scene.warnings,
                 },
-            )?;
-            let png = ops::encode_png(&out.rgba, w, h)?;
-            Ok((png, out.warnings, ms_since(start)))
+                ms_since(start),
+            ))
         })
         .await?;
-    Ok(png_response(png, &warnings, ms))
+    Ok(png_response(rendered, ms))
 }
 
-fn png_response(png: Vec<u8>, warnings: &[String], ms: f64) -> Response {
-    let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
-    headers.insert(X_COMPUTE_MS, ms_header(ms));
-    add_warnings(&mut headers, warnings);
-    (headers, png).into_response()
+/// What a 3D render draws
+struct Scene {
+    /// The faces, with their own normals
+    mesh: scratchcad_occt_rhai::Mesh,
+    /// The edges drawn over them
+    lines: Vec<[DVec3; 2]>,
+    warnings: Vec<String>,
+}
+
+fn scene(
+    shape: &Shape,
+    tolerance: f64,
+    max_triangles: usize,
+    edges: bool,
+) -> Result<Scene, ApiError> {
+    if shape.faces().is_empty() {
+        // Wires and edges have nothing to shade: draw their edges instead.
+        let warning = format!(
+            "the shape is a {} with no faces, so only its edges are drawn",
+            shape.shape_type()
+        );
+        return Ok(Scene {
+            mesh: Default::default(),
+            lines: mesh::sampled_edges(shape),
+            warnings: vec![warning],
+        });
+    }
+    let shown = mesh::mesh(shape, tolerance, max_triangles)?;
+    let lines = if edges {
+        mesh::sharp_edges(&shown.welded())
+    } else {
+        vec![]
+    };
+    Ok(Scene {
+        mesh: shown,
+        lines,
+        warnings: vec![],
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// STL export
-
-fn default_mesh_depth() -> u8 {
-    6
-}
+// Export
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StlRequest {
+pub struct ExportRequest {
     script: String,
-    #[serde(default)]
-    evaluator: Evaluator,
-    /// Octree depth; the region is subdivided into up to `(2^depth)^3` cells
-    #[serde(default = "default_mesh_depth")]
-    depth: u8,
-    /// Center of the meshed region
-    #[serde(default)]
-    center: [f32; 3],
-    /// The meshed region is the cube `center ± half_size`
-    #[serde(default = "default_half_size")]
-    half_size: f32,
+    /// Mesh formats only: the largest distance between the mesh and the
+    /// true surface.  Defaults to 1e-3 of the bounding-box diagonal.
+    tolerance: Option<f64>,
 }
 
-/// `POST /v1/export/stl` — mesh the shape and return a binary STL
-pub async fn export_stl(
+/// `POST /v1/export/{format}` — the shape as STEP, IGES, BREP, STL, OBJ or 3MF
+pub async fn export(
     State(state): State<AppState>,
-    ApiJson(req): ApiJson<StlRequest>,
+    Path(format): Path<String>,
+    ApiJson(req): ApiJson<ExportRequest>,
 ) -> Result<Response, ApiError> {
-    let max_depth = state.config.max_mesh_depth;
-    if !(1..=max_depth).contains(&req.depth) {
-        return Err(ApiError::LimitExceeded(format!(
-            "`depth` must be in 1..={max_depth}"
-        )));
+    let format = ExportFormat::from_extension(&format).ok_or_else(|| {
+        ApiError::NotFound(format!(
+            "unknown export format `{format}`; expected {}",
+            ExportFormat::names()
+        ))
+    })?;
+    if let Some(t) = req.tolerance {
+        if !format.is_mesh() {
+            return Err(ApiError::BadRequest(format!(
+                "`tolerance` only applies to mesh formats (stl, obj and 3mf), not {}",
+                format.extension()
+            )));
+        }
+        positive("tolerance", t)?;
     }
-    finite("center", &req.center)?;
-    positive("half_size", req.half_size)?;
     check_script_len(&state, &req.script)?;
-    let world_to_model = transform_3d(req.center, req.half_size);
 
     let st = state.clone();
-    let max_triangles = state.config.max_mesh_triangles;
-    let (stl, ms) = state
+    let (out, ms) = state
         .jobs
         .run(move |ctx| {
             let c = compile(&st, &req.script, ctx)?;
-            ctx.set_stage(Stage::Meshing);
             let start = Instant::now();
-            let stl = ops::dispatch(
-                req.evaluator,
-                &c,
-                ops::MeshJob {
-                    depth: req.depth,
-                    world_to_model,
-                    max_triangles,
-                    pool: &ctx.pool,
-                    cancel: ctx.cancel.clone(),
-                    set_stage: &|s| ctx.set_stage(s),
-                },
-            )?;
-            Ok((stl, ms_since(start)))
+            let out = if format.is_mesh() {
+                export_mesh(&st, ctx, &c.shape, format, req.tolerance)?
+            } else {
+                ctx.set_stage(Stage::Exporting);
+                Exported {
+                    bytes: export::exact(&c.shape, format)?,
+                    mesh: None,
+                    warnings: vec![],
+                }
+            };
+            Ok((out, ms_since(start)))
         })
         .await?;
 
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("model/stl"));
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(format.media_type()),
+    );
+    let disposition = format!("attachment; filename=\"shape.{}\"", format.extension());
     headers.insert(
         header::CONTENT_DISPOSITION,
-        HeaderValue::from_static("attachment; filename=\"shape.stl\""),
+        HeaderValue::from_str(&disposition).expect("ASCII file name"),
     );
     headers.insert(X_COMPUTE_MS, ms_header(ms));
-    headers.insert(X_TRIANGLES, HeaderValue::from(stl.triangles));
-    add_warnings(&mut headers, &stl.warnings);
+    if let Some((triangles, tolerance)) = out.mesh {
+        headers.insert(X_TRIANGLES, HeaderValue::from(triangles));
+        headers.insert(X_TOLERANCE, number_header(&[tolerance]));
+    }
+    add_warnings(&mut headers, &out.warnings);
+    Ok((headers, out.bytes).into_response())
+}
+
+/// An exported file, with the triangle count and tolerance of a mesh
+struct Exported {
+    bytes: Vec<u8>,
+    mesh: Option<(usize, f64)>,
+    warnings: Vec<String>,
+}
+
+fn export_mesh(
+    state: &AppState,
+    ctx: &JobCtx,
+    shape: &Shape,
+    format: ExportFormat,
+    requested: Option<f64>,
+) -> Result<Exported, ApiError> {
+    ctx.set_stage(Stage::Measuring);
+    let bbox = measure::bounding_box(shape)?;
+    let (tolerance, warning) = mesh::export_tolerance(requested, diagonal(&bbox));
+    let mut warnings: Vec<String> = warning.into_iter().collect();
+    if shape.faces().is_empty() {
+        return Err(ApiError::EmptyMesh(format!(
+            "the shape is a {} with no faces, so its mesh has no triangles; \
+             export it as STEP, IGES or BREP, or make faces or solids from it",
+            shape.shape_type()
+        )));
+    }
+    if shape.solids().is_empty() {
+        warnings.push(format!(
+            "the shape is a {} with no solids, so the mesh is not watertight",
+            shape.shape_type()
+        ));
+    }
+    ctx.set_stage(Stage::Meshing);
+    let welded = mesh::mesh(shape, tolerance, state.config.max_mesh_triangles)?.welded();
+    ctx.set_stage(Stage::Exporting);
+    let bytes = export::mesh(&welded, format)?;
     tracing::debug!(
-        triangles = stl.triangles,
-        vertices = stl.vertices,
+        triangles = welded.triangle_count(),
+        vertices = welded.vertex_count(),
+        tolerance,
         "mesh built"
     );
-    Ok((headers, stl.bytes).into_response())
+    Ok(Exported {
+        bytes,
+        mesh: Some((welded.triangle_count(), tolerance)),
+        warnings,
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -596,19 +573,14 @@ pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nalgebra::Point3;
-
-    fn close(a: Point3<f32>, b: [f32; 3]) -> bool {
-        (a - Point3::from(b)).norm() < 1e-5
-    }
 
     #[test]
     fn validators() {
         assert!(finite("p", &[0.0, 1.0]).is_ok());
-        assert!(finite("p", &[f32::NAN]).is_err());
-        assert!(finite("p", &[f32::INFINITY, 0.0]).is_err());
+        assert!(finite("p", &[f64::NAN]).is_err());
+        assert!(finite("p", &[f64::INFINITY, 0.0]).is_err());
         assert!(positive("s", 0.5).is_ok());
-        for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert!(positive("s", bad).is_err(), "{bad}");
         }
         assert_eq!(dim("w", 1, 8).unwrap(), 1);
@@ -618,104 +590,11 @@ mod tests {
     }
 
     #[test]
-    fn region_transforms_map_unit_cube_to_region() {
-        let m = transform_3d([1.0, 2.0, 3.0], 4.0);
-        assert!(close(
-            m.transform_point(&Point3::new(-1.0, -1.0, -1.0)),
-            [-3.0, -2.0, -1.0]
-        ));
-        assert!(close(
-            m.transform_point(&Point3::new(1.0, 1.0, 1.0)),
-            [5.0, 6.0, 7.0]
-        ));
-
-        let m = transform_2d([1.0, -1.0], 2.0);
-        let p = m.transform_point(&nalgebra::Point2::new(1.0, 1.0));
-        assert!((p - nalgebra::Point2::new(3.0, 1.0)).norm() < 1e-6);
-    }
-
-    #[test]
-    fn camera_without_rotation_matches_region_transform() {
-        let r = Rotation::default();
-        assert_eq!(
-            camera_3d([1.0, 2.0, 3.0], 2.0, &r, 0.0),
-            transform_3d([1.0, 2.0, 3.0], 2.0)
-        );
-    }
-
-    #[test]
-    fn camera_rotation_and_perspective() {
-        // 90° of yaw (about Y) takes +X to -Z
-        let r = Rotation {
-            yaw: 90.0,
-            ..Default::default()
-        };
-        let m = camera_3d([0.0; 3], 1.0, &r, 0.0);
-        assert!(close(
-            m.transform_point(&Point3::new(1.0, 0.0, 0.0)),
-            [0.0, 0.0, -1.0]
-        ));
-
-        // Perspective shrinks points further from the viewer (larger z)
-        let m = camera_3d([0.0; 3], 1.0, &Rotation::default(), 0.5);
-        let near = m.transform_point(&Point3::new(1.0, 0.0, -1.0));
-        let far = m.transform_point(&Point3::new(1.0, 0.0, 1.0));
-        assert!(near.x > far.x);
-    }
-
-    fn eval_req(mode: EvalMode, points: usize, intervals: usize) -> EvalRequest {
-        EvalRequest {
-            script: "x".into(),
-            evaluator: Evaluator::Vm,
-            mode,
-            points: vec![[0.0; 3]; points],
-            intervals: vec![[[0.0, 1.0]; 3]; intervals],
-        }
-    }
-
-    #[test]
-    fn eval_request_validation() {
-        assert_eq!(eval_req(EvalMode::Value, 3, 0).validate(10).unwrap(), 3);
-        assert_eq!(
-            eval_req(EvalMode::Gradient, 10, 0).validate(10).unwrap(),
-            10
-        );
-        assert_eq!(eval_req(EvalMode::Interval, 0, 2).validate(10).unwrap(), 2);
-
-        let bad = |r: EvalRequest, max| r.validate(max).unwrap_err();
-        assert!(matches!(
-            bad(eval_req(EvalMode::Value, 0, 0), 10),
-            ApiError::BadRequest(_)
-        ));
-        assert!(matches!(
-            bad(eval_req(EvalMode::Value, 1, 1), 10),
-            ApiError::BadRequest(_)
-        ));
-        assert!(matches!(
-            bad(eval_req(EvalMode::Interval, 1, 1), 10),
-            ApiError::BadRequest(_)
-        ));
-        assert!(matches!(
-            bad(eval_req(EvalMode::Interval, 0, 0), 10),
-            ApiError::BadRequest(_)
-        ));
-        assert!(matches!(
-            bad(eval_req(EvalMode::Value, 11, 0), 10),
-            ApiError::LimitExceeded(_)
-        ));
-        assert!(matches!(
-            bad(eval_req(EvalMode::Interval, 0, 11), 10),
-            ApiError::LimitExceeded(_)
-        ));
-
-        let mut r = eval_req(EvalMode::Value, 1, 0);
-        r.points[0][1] = f32::NAN;
-        assert!(matches!(bad(r, 10), ApiError::BadRequest(_)));
-        let mut r = eval_req(EvalMode::Interval, 0, 1);
-        r.intervals[0][2] = [2.0, 1.0];
-        assert!(matches!(bad(r, 10), ApiError::BadRequest(_)));
-        let mut r = eval_req(EvalMode::Interval, 0, 1);
-        r.intervals[0][0] = [f32::NEG_INFINITY, 1.0];
-        assert!(matches!(bad(r, 10), ApiError::BadRequest(_)));
+    fn headers() {
+        assert_eq!(number_header(&[1.5, -2.0, 0.25]), "1.5,-2,0.25");
+        let mut h = HeaderMap::new();
+        add_warnings(&mut h, &["plain".into(), "über".into()]);
+        let all: Vec<_> = h.get_all(X_WARNING).iter().collect();
+        assert_eq!(all, ["plain", "?ber"]);
     }
 }
