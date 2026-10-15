@@ -7,9 +7,11 @@ use axum::{
     http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, thiserror::Error)]
+/// Workers send these to the server as JSON (see `worker`), so a job's
+/// error reaches the client as if the server had raised it.
+#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum ApiError {
     #[error("{0}")]
     BadRequest(String),
@@ -51,6 +53,11 @@ pub enum ApiError {
     #[error("{0}")]
     ExportFailed(String),
 
+    /// The worker process running the job died: OpenCASCADE crashed, which
+    /// it can do when it runs out of memory
+    #[error("{0}")]
+    Crashed(String),
+
     /// The message says which stage was running and the budget it exceeded
     #[error("{0}")]
     Timeout(String),
@@ -71,13 +78,6 @@ struct Inner<'a> {
 }
 
 impl ApiError {
-    /// Work stopped because its [`CancelToken`](scratchcad_occt_rhai::CancelToken)
-    /// was tripped.  When that was the job budget, [`Jobs`](crate::jobs::Jobs)
-    /// replaces this with a message naming the stage that ran out of time.
-    pub fn cancelled() -> Self {
-        Self::Timeout("the job was cancelled before it finished".into())
-    }
-
     fn status_and_code(&self) -> (StatusCode, &'static str) {
         match self {
             Self::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
@@ -92,6 +92,7 @@ impl ApiError {
             Self::EmptyMesh(_) => (StatusCode::UNPROCESSABLE_ENTITY, "empty_mesh"),
             Self::MeshFailed(_) => (StatusCode::UNPROCESSABLE_ENTITY, "mesh_failed"),
             Self::ExportFailed(_) => (StatusCode::UNPROCESSABLE_ENTITY, "export_failed"),
+            Self::Crashed(_) => (StatusCode::UNPROCESSABLE_ENTITY, "worker_crashed"),
             Self::Timeout(_) => (StatusCode::GATEWAY_TIMEOUT, "timeout"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
@@ -179,6 +180,7 @@ mod tests {
             (ApiError::EmptyMesh("m".into()), 422, "empty_mesh"),
             (ApiError::MeshFailed("m".into()), 422, "mesh_failed"),
             (ApiError::ExportFailed("m".into()), 422, "export_failed"),
+            (ApiError::Crashed("m".into()), 422, "worker_crashed"),
             (ApiError::Timeout("m".into()), 504, "timeout"),
             (ApiError::Internal("m".into()), 500, "internal"),
         ];

@@ -4,8 +4,8 @@
 //! Both render at twice the requested resolution and average 2x2 blocks, so
 //! edges are antialiased.
 
-use scratchcad_occt_rhai::{BoundingBox, CancelToken, DVec2, DVec3, Mesh};
-use serde::Deserialize;
+use scratchcad_occt_rhai::{BoundingBox, DVec2, DVec3, Mesh};
+use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
 
@@ -15,10 +15,6 @@ const SS: usize = 2;
 const FRAME_MARGIN: f64 = 1.08;
 /// Perspective views clip geometry this close to the eye (in units of `w`)
 const NEAR_W: f64 = 0.01;
-/// Triangles or line segments drawn between checks of the cancel token
-const CANCEL_EVERY: usize = 2048;
-/// Pixels visited between checks of the cancel token, for large triangles
-const CANCEL_PIXELS: usize = 1 << 20;
 
 /// Lambert shading: light from the upper left, a little toward the viewer
 const LIGHT: DVec3 = DVec3::new(-0.4, 0.55, 0.75);
@@ -28,7 +24,7 @@ const SURFACE: [f64; 3] = [0.74, 0.78, 0.84];
 const BACK_SIDE: f64 = 0.7;
 const EDGE: [u8; 3] = [32, 34, 40];
 
-#[derive(Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode3d {
     /// Grayscale depth: nearer is brighter
@@ -40,7 +36,7 @@ pub enum Mode3d {
     Shaded,
 }
 
-#[derive(Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode2d {
     /// The section filled white on black (even-odd rule)
@@ -52,7 +48,7 @@ pub enum Mode2d {
 
 /// Rotation in degrees, composed as yaw (about Y) · roll (about Z) · pitch
 /// (about X): pitch acts first, then roll, then yaw
-#[derive(Deserialize, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Rotation {
     #[serde(default)]
@@ -366,14 +362,14 @@ fn shade(mode: Mode3d, n: DVec3, back: bool) -> [u8; 3] {
     }
 }
 
-/// Draws one triangle; returns how many pixels it visited
-fn rasterize(frame: &mut Frame, tri: [Projected; 3], mode: Mode3d) -> usize {
+/// Draws one triangle
+fn rasterize(frame: &mut Frame, tri: [Projected; 3], mode: Mode3d) {
     let [a, b, c] = tri;
     // Twice the signed area in pixels; pixels have y down, so a triangle
     // that is counter-clockwise (front-facing) on screen has a negative one.
     let area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     if area == 0.0 || !area.is_finite() {
-        return 0;
+        return;
     }
     let back = area > 0.0;
     let px = frame.px;
@@ -413,7 +409,6 @@ fn rasterize(frame: &mut Frame, tri: [Projected; 3], mode: Mode3d) -> usize {
             frame.color[i] = shade(mode, n, back);
         }
     }
-    x1.saturating_sub(x0) * y1.saturating_sub(y0)
 }
 
 /// The parameters `[t0, t1]` of the part of the segment `a + t (b - a)`,
@@ -504,27 +499,14 @@ pub struct View3d {
 /// Renders a mesh (with its own per-face normals) and line segments to RGBA
 /// pixels, transparent where nothing is drawn.  `bbox` sets the depth range
 /// of the heightmap mode and how far behind a surface a line still shows.
-pub fn render_3d(
-    view: &View3d,
-    mesh: &Mesh,
-    lines: &[[DVec3; 2]],
-    bbox: &BoundingBox,
-    cancel: &CancelToken,
-) -> Result<Vec<u8>, ApiError> {
+pub fn render_3d(view: &View3d, mesh: &Mesh, lines: &[[DVec3; 2]], bbox: &BoundingBox) -> Vec<u8> {
     let camera = &view.camera;
     let mut frame = Frame::new(Pixels::new(view.width, view.height));
     let vertex = |i: usize| ViewVertex {
         v: camera.to_view(mesh.vertices[i]),
         n: camera.dir_to_view(mesh.normals[i]),
     };
-    let mut visited = 0;
-    for (t, tri) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
-        if t % CANCEL_EVERY == 0 || visited > CANCEL_PIXELS {
-            if cancel.is_cancelled() {
-                return Err(ApiError::cancelled());
-            }
-            visited = 0;
-        }
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let clipped = clip_near([vertex(tri[0]), vertex(tri[1]), vertex(tri[2])], camera);
         let poly = clipped.as_slice();
         if poly.len() < 3 {
@@ -536,7 +518,7 @@ pub fn render_3d(
         let mut previous = project(&poly[1], camera, &px);
         for vertex in &poly[2..] {
             let next = project(vertex, camera, &px);
-            visited += rasterize(&mut frame, [first, previous, next], view.mode);
+            rasterize(&mut frame, [first, previous, next], view.mode);
             previous = next;
         }
     }
@@ -559,10 +541,7 @@ pub fn render_3d(
         }
         Mode3d::Shaded | Mode3d::Normals => {
             let bias = 0.01 * (near - far).max(1e-9);
-            for (i, [a, b]) in lines.iter().enumerate() {
-                if i % CANCEL_EVERY == 0 && cancel.is_cancelled() {
-                    return Err(ApiError::cancelled());
-                }
+            for [a, b] in lines {
                 let ends = [a, b].map(|m| ViewVertex {
                     v: camera.to_view(*m),
                     n: DVec3::ZERO,
@@ -577,7 +556,7 @@ pub fn render_3d(
             }
         }
     }
-    Ok(frame.downsample())
+    frame.downsample()
 }
 
 /// The part of a segment in front of the eye, if any
@@ -674,13 +653,8 @@ impl View2d {
 
 /// Renders section segments white on black: filled by the even-odd rule
 /// ([`Mode2d::Mono`]) or as an outline.  The work is bounded by the image's
-/// size and the number of segments, however far the view is zoomed in, and
-/// stops when `cancel` is tripped.
-pub fn render_2d(
-    view: &View2d,
-    segments: &[[DVec2; 2]],
-    cancel: &CancelToken,
-) -> Result<Vec<u8>, ApiError> {
+/// size and the number of segments, however far the view is zoomed in.
+pub fn render_2d(view: &View2d, segments: &[[DVec2; 2]]) -> Vec<u8> {
     let px = Pixels::new(view.width, view.height);
     let to_pixel = |p: DVec2| {
         let s = (p - view.center) / view.half_size;
@@ -688,10 +662,7 @@ pub fn render_2d(
         DVec2::new(x, y)
     };
     let mut covered = vec![false; px.len()];
-    for (i, segment) in segments.iter().enumerate() {
-        if i % CANCEL_EVERY == 0 && cancel.is_cancelled() {
-            return Err(ApiError::cancelled());
-        }
+    for segment in segments {
         let [a, b] = segment.map(to_pixel);
         match view.mode {
             Mode2d::Mono => {
@@ -751,7 +722,7 @@ pub fn render_2d(
             out.extend([level, level, level, 255]);
         }
     }
-    Ok(out)
+    out
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -885,7 +856,7 @@ mod tests {
             mode,
             camera: Camera::framing(&bbox, (32, 32), &rotation, perspective, None, None),
         };
-        render_3d(&view, &mesh, &lines, &bbox, &CancelToken::new()).unwrap()
+        render_3d(&view, &mesh, &lines, &bbox)
     }
 
     fn render(script: &str, mode: Mode3d, rotation: Rotation, perspective: f64) -> Vec<u8> {
@@ -964,7 +935,7 @@ mod tests {
             mode: Mode3d::Shaded,
             camera: Camera::new(DVec3::ZERO, 1.0, &Rotation::default(), 1.0),
         };
-        let img = render_3d(&view, &mesh, &lines, &bbox, &CancelToken::new()).unwrap();
+        let img = render_3d(&view, &mesh, &lines, &bbox);
         assert_eq!(img.len(), 16 * 16 * 4);
         // Looking out from inside, the far wall's inside fills the view
         assert!(pixels(&img).iter().all(|p| p[3] == 255));
@@ -1002,31 +973,6 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_renders_stop() {
-        let shape = eval_shape("sphere(1)").unwrap();
-        let bbox = shape.bounding_box().unwrap();
-        let mesh = shape.mesh(0.1).unwrap();
-        let view = View3d {
-            width: 8,
-            height: 8,
-            mode: Mode3d::Shaded,
-            camera: Camera::framing(&bbox, (8, 8), &Rotation::default(), 0.0, None, None),
-        };
-        let cancel = CancelToken::new();
-        cancel.cancel();
-        assert!(matches!(
-            render_3d(&view, &mesh, &[], &bbox, &cancel),
-            Err(ApiError::Timeout(_))
-        ));
-        let empty = Mesh::default();
-        let lines = [[DVec3::ZERO, DVec3::X]];
-        assert!(matches!(
-            render_3d(&view, &empty, &lines, &bbox, &cancel),
-            Err(ApiError::Timeout(_))
-        ));
-    }
-
-    #[test]
     fn sections_of_a_box() {
         // Resting on the plane: the section is the base's outline
         let welded = eval_shape("box(4, 2, 3)")
@@ -1047,7 +993,7 @@ mod tests {
         let bbox = shape.bounding_box().unwrap();
         let segments = section(&shape.mesh(0.01).unwrap().welded());
         let view = View2d::framing(&bbox, size, mode, None, None);
-        render_2d(&view, &segments, &CancelToken::new()).unwrap()
+        render_2d(&view, &segments)
     }
 
     #[test]
@@ -1101,7 +1047,7 @@ mod tests {
     }
 
     fn render_segments(mode: Mode2d, segments: &[[DVec2; 2]]) -> Vec<u8> {
-        render_2d(&view_2d(mode), segments, &CancelToken::new()).unwrap()
+        render_2d(&view_2d(mode), segments)
     }
 
     #[test]
@@ -1129,7 +1075,7 @@ mod tests {
         };
         let bbox = unit_box();
         let line = [[DVec3::new(-1e9, 0.05, 0.0), DVec3::new(1e9, 0.05, 0.0)]];
-        let img = render_3d(&view, &Mesh::default(), &line, &bbox, &CancelToken::new()).unwrap();
+        let img = render_3d(&view, &Mesh::default(), &line, &bbox);
         for x in 0..16 {
             let column = (0..16).map(|y| img[(y * 16 + x) * 4 + 3]).max().unwrap();
             assert!(column > 0, "gap at column {x}");
@@ -1151,19 +1097,6 @@ mod tests {
         assert_eq!(at(25, 8), 0, "right of x = 1");
         assert_eq!(at(0, 2), 0, "above y = 0.5");
         assert_eq!(at(0, 13), 0, "below y = -0.5");
-    }
-
-    #[test]
-    fn cancelled_sections_stop() {
-        let cancel = CancelToken::new();
-        cancel.cancel();
-        let segment = [[DVec2::ZERO, DVec2::X]];
-        for mode in [Mode2d::Mono, Mode2d::Outline] {
-            assert!(matches!(
-                render_2d(&view_2d(mode), &segment, &cancel),
-                Err(ApiError::Timeout(_))
-            ));
-        }
     }
 
     #[test]

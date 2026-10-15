@@ -6,9 +6,11 @@ use std::{fmt::Write as _, io::Write as _};
 
 use scratchcad_occt_rhai::{Error, Format, Mesh, MeshOptions, Shape};
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::ApiError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExportFormat {
     Step,
     Iges,
@@ -100,7 +102,6 @@ pub fn exact(shape: &Shape, format: ExportFormat) -> Result<Vec<u8>, ApiError> {
 
 fn export_error(e: Error, format: Format) -> ApiError {
     match e {
-        Error::Cancelled => ApiError::cancelled(),
         Error::Io(m) => ApiError::ExportFailed(m),
         other => ApiError::ExportFailed(format!("{format} export failed: {other}")),
     }
@@ -314,19 +315,6 @@ mod tests {
         assert!(matches!(e, ApiError::ExportFailed(m) if m == "failed to write STEP"));
         let e = export_error(Error::Occt("Standard_Failure".into()), Format::Iges);
         assert!(matches!(e, ApiError::ExportFailed(m) if m.starts_with("IGES export failed")));
-        assert!(matches!(
-            export_error(Error::Cancelled, Format::Brep),
-            ApiError::Timeout(_)
-        ));
-    }
-
-    #[test]
-    fn cancelled_exports_stop() {
-        let shape = eval_shape("cube(10)").unwrap();
-        let token = scratchcad_occt_rhai::CancelToken::new();
-        token.cancel();
-        let r = scratchcad_occt_rhai::with_cancel(&token, || exact(&shape, ExportFormat::Step));
-        assert!(matches!(r, Err(ApiError::Timeout(_))), "{:?}", r.err());
     }
 
     #[test]

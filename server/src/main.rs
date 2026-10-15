@@ -4,40 +4,35 @@ use clap::Parser;
 use scratchcad::{
     AppState,
     config::{Config, LogFormat},
+    jobs::Worker,
 };
-use scratchcad_occt_rhai::{MessageLevel, set_message_handler};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `scratchcad worker` runs one job for the server; see `worker`.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "worker")
+    {
+        return scratchcad::worker::main();
+    }
     let config = Config::parse();
     config.validate()?;
     init_tracing(config.log_format);
-    // OpenCASCADE prints to stdout, which carries our logs. Route its messages
-    // through tracing instead; this swaps its printer, so do it before any
-    // thread can be using OpenCASCADE.
-    set_message_handler(MessageLevel::Warning, log_occt_message);
+    let worker = Worker::current_exe()?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let result = rt.block_on(serve(config));
-    // Abandoned blocking jobs have been cancelled and normally stop quickly;
-    // never let a stuck one hold the process open indefinitely.
+    let result = rt.block_on(serve(config, worker));
+    // Dropping the runtime drops the jobs still running, which kills their
+    // workers; never let anything hold the process open indefinitely.
     rt.shutdown_timeout(Duration::from_secs(5));
     tracing::info!("shutdown complete");
     result
 }
 
-/// Logs one of OpenCASCADE's messages (warnings and worse)
-fn log_occt_message(level: MessageLevel, text: &str) {
-    let text = text.trim();
-    match level {
-        MessageLevel::Fail => tracing::error!(target: "occt", "{text}"),
-        _ => tracing::warn!(target: "occt", "{text}"),
-    }
-}
-
-async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve(config: Config, worker: Worker) -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
@@ -49,7 +44,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("SCRATCHCAD_API_TOKEN is not set; the API is unauthenticated");
     }
 
-    let state = AppState::new(config);
+    let state = AppState::new(config, worker);
     let app = scratchcad::router(state.clone());
 
     let drain = state.clone();

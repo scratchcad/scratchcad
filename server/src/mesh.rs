@@ -60,10 +60,7 @@ pub fn render_tolerance(pixel: f64, diagonal: f64) -> f64 {
 }
 
 fn mesh_error(e: Error) -> ApiError {
-    match e {
-        Error::Cancelled => ApiError::cancelled(),
-        other => ApiError::MeshFailed(format!("meshing failed: {other}")),
-    }
+    ApiError::MeshFailed(format!("meshing failed: {e}"))
 }
 
 /// Triangulates every face, failing if the mesh has more than `max_triangles`
@@ -200,7 +197,6 @@ mod tests {
             mesh(&shape, -1.0, 100),
             Err(ApiError::MeshFailed(m)) if m.contains("tolerance")
         ));
-        assert!(matches!(mesh_error(Error::Cancelled), ApiError::Timeout(_)));
     }
 
     #[test]

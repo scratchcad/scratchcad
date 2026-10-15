@@ -68,13 +68,14 @@ Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 | 404 | `not_found` | unknown route or export format |
 | 413 | `payload_too_large` | body over `SCRATCHCAD_MAX_BODY_BYTES` |
 | 422 | `script_error` | Rhai parse or runtime error, including failed modelling operations such as a fillet that is too large (message includes line and column) |
-| 422 | `limit_exceeded` | a configured limit was hit (size, operations, triangles and so on) |
+| 422 | `limit_exceeded` | a configured limit was hit (size, operations, faces, triangles, file size, the worker's memory or CPU time and so on) |
 | 422 | `unprocessable` | the shape is empty, or can't be measured |
 | 422 | `empty_mesh` | a mesh export of a shape with no faces (a wire, say) |
 | 422 | `mesh_failed` | OpenCASCADE could not mesh the shape |
 | 422 | `export_failed` | OpenCASCADE could not write the shape in the requested format |
+| 422 | `worker_crashed` | OpenCASCADE crashed the job's worker process, which it can do when it runs out of memory |
 | 503 | `overloaded` | no job slot became free within the queue timeout (`Retry-After: 1`) |
-| 504 | `timeout` | the job ran past `SCRATCHCAD_JOB_TIMEOUT_MS` and was cancelled |
+| 504 | `timeout` | the job ran past `SCRATCHCAD_JOB_TIMEOUT_MS` and its worker was killed |
 
 Every response carries an `x-request-id` header. If the request sent one, it
 is propagated. PNG and export responses also carry `x-compute-ms` (the time
@@ -167,7 +168,9 @@ mesh formats only (giving it for an exact format is a `400`): the largest
 distance between the mesh and the true surface, by default 1e-3 of the
 bounding box's diagonal and never finer than 1e-5 of it (a finer request is
 raised to that, with a warning). Meshes also follow curves to within 15
-degrees, and may have at most `SCRATCHCAD_MAX_MESH_TRIANGLES` triangles.
+degrees, and may have at most `SCRATCHCAD_MAX_MESH_TRIANGLES` triangles. A file
+over `SCRATCHCAD_MAX_EXPORT_BYTES` is a `limit_exceeded` error; binary STL takes
+50 bytes per triangle.
 
 Mesh formats are written from the welded mesh, whose faces share the vertices
 on their common edges, so a solid's mesh is watertight. Mesh responses carry
@@ -184,13 +187,14 @@ Neither probe requires authentication.
 ## Production behaviour
 
 - **Sandboxed scripts.** Rhai runs with an operation budget, limits on call depth, expression depth, string, array and map size. It has no file functions, no modules (`import` loads nothing) and no `eval`, and `print`/`debug` are captured into the response rather than written to stdout. Error tags are read-only, so a script can't pass its own errors off as the kernel's.
-- **One thread per job.** OpenCASCADE shapes can't be shared between threads, so a job runs the script, meshes, renders and exports on one blocking thread and returns bytes. At most `SCRATCHCAD_MAX_CONCURRENT_JOBS` jobs run at once; other requests queue for up to `SCRATCHCAD_QUEUE_TIMEOUT_MS` and then get a `503`.
-- **Real cancellation.** Every job runs under a `CancelToken` that trips on timeout **and** when the client disconnects. Booleans, shells, meshing (between faces) and STEP/IGES/BREP conversion stop part way, the script stops between operations, and the renderer checks it as it goes. Fillets, chamfers and lofts can't be interrupted once started, but don't start after a cancel. A job keeps its slot until it has actually stopped, so timed-out work never oversubscribes the machine.
-- **Bounded inputs and outputs.** Limits cover body size, script size, image dimensions and triangle count. Every float input is checked to be finite.
-- **Fault isolation.** A panic in a job or handler becomes a `500` with a generic message, and the details go to the logs under the request ID (the `x-request-id` response header).
+- **One worker process per job.** The server never runs OpenCASCADE itself. Each job (the script, then measuring, meshing, rendering or exporting) runs in a fresh `scratchcad worker` process, which gets the request on stdin and sends back bytes and plain data. At most `SCRATCHCAD_MAX_CONCURRENT_JOBS` jobs run at once; other requests queue for up to `SCRATCHCAD_QUEUE_TIMEOUT_MS` and then get a `503`. Starting a worker costs a few tens of milliseconds.
+- **Killed, not cancelled.** Some OpenCASCADE operations (fillets, chamfers, lofts, sweeps) can't be interrupted once started, so a job that runs past its budget, or whose client disconnects, has its worker killed. The job keeps its slot until the worker has exited, so abandoned work never oversubscribes the machine, and that happens at once.
+- **Memory and CPU limits.** A worker can use at most `SCRATCHCAD_WORKER_MEMORY_MIB` of heap (`RLIMIT_DATA`) and `SCRATCHCAD_WORKER_CPU_SECONDS` of CPU time, and dumps no core. Running out is a `limit_exceeded` error naming the stage. OpenCASCADE sometimes crashes instead of failing cleanly when it runs out of memory, and that is a `worker_crashed` error. Give the container `SCRATCHCAD_MAX_CONCURRENT_JOBS` × `SCRATCHCAD_WORKER_MEMORY_MIB` of memory, plus a little for the server. Workers inherit the environment except the `SCRATCHCAD_*` settings, so they never see the API token. They run as the same user as the server: they contain faults, but they are not a security boundary.
+- **Bounded inputs and outputs.** Limits cover body size, script size, image dimensions, face count (checked before any measuring, meshing or exporting), triangle count and export size. Every float input is checked to be finite.
+- **Fault isolation.** A panic in a handler, or a worker that dies for no reason above, becomes a `500` with a generic message, and the details go to the logs under the request ID (the `x-request-id` response header).
 - **Timeouts say what ran out.** A `504` names the stage that was running (the script, measuring, meshing, rendering or exporting) and the budget it exceeded.
-- **Graceful shutdown.** On `SIGTERM` or `SIGINT`, readiness flips to `503`, queued jobs are rejected, in-flight requests finish, and blocking work gets 5 s to wind down.
-- **Observability.** Structured logs (`SCRATCHCAD_LOG_FORMAT=json`, filtered with `RUST_LOG`) carry a per-request span with the request ID, and the log level is set by response status. OpenCASCADE's own warnings and failures are logged under the `occt` target instead of printed to stdout.
+- **Graceful shutdown.** On `SIGTERM` or `SIGINT`, readiness flips to `503`, queued jobs are rejected and in-flight requests finish. Workers die with the server.
+- **Observability.** Structured logs (`SCRATCHCAD_LOG_FORMAT=json`, filtered with `RUST_LOG`) carry a per-request span with the request ID, and the log level is set by response status. Workers write OpenCASCADE's own warnings and failures to their stderr, and the server logs them under the `occt` target, in the request's span.
 - **Authentication.** An optional bearer token (`SCRATCHCAD_API_TOKEN`, at least 16 chars) is compared in constant time, and the `Authorization` header is redacted from logs.
 - The container image is `debian:trixie-slim` with Debian's OpenCASCADE libraries, and runs as a non-root user.
 
@@ -208,13 +212,17 @@ Every option is a flag or an environment variable (`scratchcad --help`):
 | `SCRATCHCAD_LOG_FORMAT` | `text` | `text` or `json` |
 | `SCRATCHCAD_MAX_CONCURRENT_JOBS` | `4` | parallel jobs |
 | `SCRATCHCAD_QUEUE_TIMEOUT_MS` | `5000` | max wait for a job slot |
-| `SCRATCHCAD_JOB_TIMEOUT_MS` | `30000` | per-job budget |
+| `SCRATCHCAD_JOB_TIMEOUT_MS` | `30000` | per-job budget; the worker is killed when it runs out |
+| `SCRATCHCAD_WORKER_MEMORY_MIB` | `2048` | heap each job's worker may use |
+| `SCRATCHCAD_WORKER_CPU_SECONDS` | `60` | CPU time each job's worker may use |
 | `SCRATCHCAD_MAX_BODY_BYTES` | `4194304` | request body cap |
 | `SCRATCHCAD_MAX_SCRIPT_BYTES` | `65536` | script size cap |
 | `SCRATCHCAD_MAX_SCRIPT_OPERATIONS` | `1000000` | Rhai operation budget |
 | `SCRATCHCAD_MAX_IMAGE_SIZE_2D` | `4096` | max 2D width and height |
 | `SCRATCHCAD_MAX_IMAGE_SIZE_3D` | `2048` | max 3D width and height |
 | `SCRATCHCAD_MAX_MESH_TRIANGLES` | `4000000` | max triangles in a mesh, for an export or a render |
+| `SCRATCHCAD_MAX_FACES` | `100000` | max faces in a shape, checked before it is measured, meshed or exported |
+| `SCRATCHCAD_MAX_EXPORT_BYTES` | `134217728` | max size of an exported file |
 
 ## Development
 
@@ -226,10 +234,11 @@ cargo llvm-cov --summary-only        # coverage (CI requires >= 90% of lines)
 ```
 
 The tests cover three layers:
-- unit tests next to the code (sandbox, job runner, measuring, meshing, the
-  rasterizer, exports, errors)
-- HTTP tests through the full router (`tests/api.rs`)
-- end-to-end tests of the real binary, covering startup, TCP serving and
+- unit tests next to the code (sandbox, measuring, meshing, the rasterizer,
+  exports, errors, and the job runner, with `sh` scripts standing in for
+  workers)
+- HTTP tests through the full router, with real workers (`tests/api.rs`)
+- end-to-end tests of the real binary, covering startup, TCP serving, jobs and
   SIGTERM/SIGINT shutdown (`tests/binary.rs`)
 
 ## Licence

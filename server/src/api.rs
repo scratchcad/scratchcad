@@ -2,8 +2,9 @@
 //!
 //! The API is stateless: every request carries its Rhai script, which is run
 //! in the sandbox and its shape then measured, rendered or exported.  All of
-//! that happens inside one job, because shapes cannot leave the thread they
-//! were made on; jobs hand back bytes or plain data.
+//! that happens in one job, in a worker process (see `worker`): the handlers
+//! check the request, send it to a worker as a [`Job`], and turn what comes
+//! back into a response.  The `run` methods are the jobs' worker side.
 
 use std::time::Instant;
 
@@ -20,11 +21,12 @@ use crate::{
     AppState,
     error::{ApiError, ApiJson},
     export::{self, ExportFormat},
-    jobs::{JobCtx, Stage},
+    jobs::Stage,
     measure::{self, ShapeSummary},
     mesh,
     render::{self, Camera, Mode2d, Mode3d, Rotation, View2d, View3d},
     script::{self, Compiled},
+    worker::{Job, JobCtx, Output},
 };
 
 const X_COMPUTE_MS: HeaderName = HeaderName::from_static("x-compute-ms");
@@ -50,9 +52,20 @@ fn check_script_len(state: &AppState, s: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// Runs the script in the sandbox; called inside a job
-fn compile(state: &AppState, src: &str, ctx: &JobCtx) -> Result<Compiled, ApiError> {
-    script::compile(src, &state.limits, &ctx.cancel)
+/// Runs the script in the sandbox and checks the size of its shape: the
+/// first step of every job
+fn compile(src: &str, ctx: &JobCtx) -> Result<Compiled, ApiError> {
+    let c = script::compile(src, &ctx.settings.script)?;
+    ctx.set_stage(Stage::Measuring);
+    let faces = c.shape.faces().len();
+    let max = ctx.settings.max_faces;
+    if faces > max {
+        return Err(ApiError::LimitExceeded(format!(
+            "the shape has {faces} faces; the limit is {max} \
+             (simplify it, or draw fewer parts at once)"
+        )));
+    }
+    Ok(c)
 }
 
 pub(crate) fn finite<const N: usize>(name: &str, v: &[f64; N]) -> Result<(), ApiError> {
@@ -73,9 +86,9 @@ pub(crate) fn positive(name: &str, v: f64) -> Result<(), ApiError> {
     }
 }
 
-pub(crate) fn dim(name: &str, v: u32, max: u32) -> Result<u32, ApiError> {
+pub(crate) fn dim(name: &str, v: u32, max: u32) -> Result<(), ApiError> {
     if (1..=max).contains(&v) {
-        Ok(v)
+        Ok(())
     } else {
         Err(ApiError::LimitExceeded(format!(
             "`{name}` must be in 1..={max}"
@@ -123,13 +136,13 @@ fn diagonal(bbox: &scratchcad_occt_rhai::BoundingBox) -> f64 {
 ////////////////////////////////////////////////////////////////////////////////
 // Script validation
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ValidateRequest {
     script: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ValidateResponse {
     shape: ShapeSummary,
     /// `print` / `debug` output from the script
@@ -147,30 +160,30 @@ pub async fn validate_script(
     ApiJson(req): ApiJson<ValidateRequest>,
 ) -> Result<Json<ValidateResponse>, ApiError> {
     check_script_len(&state, &req.script)?;
-    let st = state.clone();
-    let out = state
-        .jobs
-        .run(move |ctx| {
-            let c = compile(&st, &req.script, ctx)?;
-            ctx.set_stage(Stage::Measuring);
-            let start = Instant::now();
-            let (shape, warnings) = measure::summarize(&c.shape)?;
-            Ok(ValidateResponse {
-                shape,
-                output: c.output,
-                warnings,
-                script_ms: c.script_ms,
-                measure_ms: ms_since(start),
-            })
-        })
-        .await?;
+    let (out, _) = state.jobs.run(Job::Validate(req)).await?;
     Ok(Json(out))
+}
+
+impl ValidateRequest {
+    pub(crate) fn run(self, ctx: &JobCtx) -> Result<Output, ApiError> {
+        let c = compile(&self.script, ctx)?;
+        let start = Instant::now();
+        let (shape, warnings) = measure::summarize(&c.shape)?;
+        let response = ValidateResponse {
+            shape,
+            output: c.output,
+            warnings,
+            script_ms: c.script_ms,
+            measure_ms: ms_since(start),
+        };
+        Output::new(&response, vec![])
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Rasterization
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Raster2dRequest {
     script: String,
@@ -186,24 +199,26 @@ pub struct Raster2dRequest {
     half_size: Option<f64>,
 }
 
-fn png_response(rendered: Rendered, ms: f64) -> Response {
+fn png_response((rendered, png): (Rendered, Vec<u8>)) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
-    headers.insert(X_COMPUTE_MS, ms_header(ms));
+    headers.insert(X_COMPUTE_MS, ms_header(rendered.ms));
     headers.insert(X_VIEW_CENTER, number_header(&rendered.center));
     headers.insert(X_VIEW_HALF_SIZE, number_header(&[rendered.half_size]));
     headers.insert(X_TOLERANCE, number_header(&[rendered.tolerance]));
     add_warnings(&mut headers, &rendered.warnings);
-    (headers, rendered.png).into_response()
+    (headers, png).into_response()
 }
 
-/// A render, and how it was made
+/// How a render (the PNG that comes with it) was made
+#[derive(Serialize, Deserialize)]
 struct Rendered {
-    png: Vec<u8>,
     center: Vec<f64>,
     half_size: f64,
     tolerance: f64,
     warnings: Vec<String>,
+    /// Time spent after the script, in milliseconds
+    ms: f64,
 }
 
 /// `POST /v1/raster/2d` — render the cross-section at z = 0 to PNG
@@ -212,10 +227,8 @@ pub async fn raster_2d(
     ApiJson(req): ApiJson<Raster2dRequest>,
 ) -> Result<Response, ApiError> {
     let max = state.config.max_image_size_2d;
-    let (w, h) = (
-        dim("width", req.width, max)?,
-        dim("height", req.height, max)?,
-    );
+    dim("width", req.width, max)?;
+    dim("height", req.height, max)?;
     if let Some(c) = &req.center {
         finite("center", c)?;
     }
@@ -223,69 +236,65 @@ pub async fn raster_2d(
         positive("half_size", h)?;
     }
     check_script_len(&state, &req.script)?;
+    Ok(png_response(state.jobs.run(Job::Raster2d(req)).await?))
+}
 
-    let st = state.clone();
-    let (rendered, ms) = state
-        .jobs
-        .run(move |ctx| {
-            let c = compile(&st, &req.script, ctx)?;
-            let start = Instant::now();
-            ctx.set_stage(Stage::Measuring);
-            let bbox = measure::bounding_box(&c.shape)?;
-            let view = View2d::framing(
-                &bbox,
-                (w, h),
-                req.mode,
-                req.center.map(DVec2::from_array),
-                req.half_size,
-            );
-            let mut warnings = vec![];
-            let pixel = 2.0 * view.half_size / f64::from(w.max(h));
-            let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
-            let segments = if bbox.min.z > 0.0 || bbox.max.z < 0.0 {
+impl Raster2dRequest {
+    pub(crate) fn run(self, ctx: &JobCtx) -> Result<Output, ApiError> {
+        let (w, h) = (self.width, self.height);
+        let c = compile(&self.script, ctx)?;
+        let start = Instant::now();
+        let bbox = measure::bounding_box(&c.shape)?;
+        let view = View2d::framing(
+            &bbox,
+            (w, h),
+            self.mode,
+            self.center.map(DVec2::from_array),
+            self.half_size,
+        );
+        let mut warnings = vec![];
+        let pixel = 2.0 * view.half_size / f64::from(w.max(h));
+        let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
+        let segments = if bbox.min.z > 0.0 || bbox.max.z < 0.0 {
+            warnings.push(format!(
+                "the plane z = 0 misses the part, which spans z = {:.6} to {:.6}; \
+                 translate it in the script to see a section",
+                bbox.min.z, bbox.max.z
+            ));
+            vec![]
+        } else {
+            ctx.set_stage(Stage::Meshing);
+            let max_triangles = ctx.settings.max_mesh_triangles;
+            let welded = mesh::mesh(&c.shape, tolerance, max_triangles)?.welded();
+            let segments = render::section(&welded);
+            if segments.is_empty() {
                 warnings.push(format!(
-                    "the plane z = 0 misses the part, which spans z = {:.6} to {:.6}; \
-                     translate it in the script to see a section",
+                    "the section at z = 0 is empty: the part spans z = {:.6} to {:.6} \
+                     but has no faces that cross the plane",
                     bbox.min.z, bbox.max.z
                 ));
-                vec![]
-            } else {
-                ctx.set_stage(Stage::Meshing);
-                let welded =
-                    mesh::mesh(&c.shape, tolerance, st.config.max_mesh_triangles)?.welded();
-                let segments = render::section(&welded);
-                if segments.is_empty() {
-                    warnings.push(format!(
-                        "the section at z = 0 is empty: the part spans z = {:.6} to {:.6} \
-                         but has no faces that cross the plane",
-                        bbox.min.z, bbox.max.z
-                    ));
-                }
-                segments
-            };
-            ctx.set_stage(Stage::Rendering);
-            let rgba = render::render_2d(&view, &segments, &ctx.cancel)?;
-            let png = render::encode_png(&rgba, w, h)?;
-            Ok((
-                Rendered {
-                    png,
-                    center: view.center.to_array().to_vec(),
-                    half_size: view.half_size,
-                    tolerance,
-                    warnings,
-                },
-                ms_since(start),
-            ))
-        })
-        .await?;
-    Ok(png_response(rendered, ms))
+            }
+            segments
+        };
+        ctx.set_stage(Stage::Rendering);
+        let rgba = render::render_2d(&view, &segments);
+        let png = render::encode_png(&rgba, w, h)?;
+        let rendered = Rendered {
+            center: view.center.to_array().to_vec(),
+            half_size: view.half_size,
+            tolerance,
+            warnings,
+            ms: ms_since(start),
+        };
+        Output::new(&rendered, png)
+    }
 }
 
 fn default_true() -> bool {
     true
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Raster3dRequest {
     script: String,
@@ -315,10 +324,8 @@ pub async fn raster_3d(
     ApiJson(req): ApiJson<Raster3dRequest>,
 ) -> Result<Response, ApiError> {
     let max = state.config.max_image_size_3d;
-    let (w, h) = (
-        dim("width", req.width, max)?,
-        dim("height", req.height, max)?,
-    );
+    dim("width", req.width, max)?;
+    dim("height", req.height, max)?;
     if let Some(c) = &req.center {
         finite("center", c)?;
     }
@@ -333,49 +340,46 @@ pub async fn raster_3d(
         ));
     }
     check_script_len(&state, &req.script)?;
+    Ok(png_response(state.jobs.run(Job::Raster3d(req)).await?))
+}
 
-    let st = state.clone();
-    let (rendered, ms) = state
-        .jobs
-        .run(move |ctx| {
-            let c = compile(&st, &req.script, ctx)?;
-            let start = Instant::now();
-            ctx.set_stage(Stage::Measuring);
-            let bbox = measure::bounding_box(&c.shape)?;
-            let camera = Camera::framing(
-                &bbox,
-                (w, h),
-                &req.rotation,
-                req.perspective,
-                req.center.map(DVec3::from_array),
-                req.half_size,
-            );
-            let pixel = 2.0 * camera.half_size / f64::from(w.max(h));
-            let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
-            ctx.set_stage(Stage::Meshing);
-            let scene = scene(&c.shape, tolerance, st.config.max_mesh_triangles, req.edges)?;
-            ctx.set_stage(Stage::Rendering);
-            let view = View3d {
-                width: w,
-                height: h,
-                mode: req.mode,
-                camera,
-            };
-            let rgba = render::render_3d(&view, &scene.mesh, &scene.lines, &bbox, &ctx.cancel)?;
-            let png = render::encode_png(&rgba, w, h)?;
-            Ok((
-                Rendered {
-                    png,
-                    center: view.camera.center.to_array().to_vec(),
-                    half_size: view.camera.half_size,
-                    tolerance,
-                    warnings: scene.warnings,
-                },
-                ms_since(start),
-            ))
-        })
-        .await?;
-    Ok(png_response(rendered, ms))
+impl Raster3dRequest {
+    pub(crate) fn run(self, ctx: &JobCtx) -> Result<Output, ApiError> {
+        let (w, h) = (self.width, self.height);
+        let c = compile(&self.script, ctx)?;
+        let start = Instant::now();
+        let bbox = measure::bounding_box(&c.shape)?;
+        let camera = Camera::framing(
+            &bbox,
+            (w, h),
+            &self.rotation,
+            self.perspective,
+            self.center.map(DVec3::from_array),
+            self.half_size,
+        );
+        let pixel = 2.0 * camera.half_size / f64::from(w.max(h));
+        let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
+        ctx.set_stage(Stage::Meshing);
+        let max_triangles = ctx.settings.max_mesh_triangles;
+        let scene = scene(&c.shape, tolerance, max_triangles, self.edges)?;
+        ctx.set_stage(Stage::Rendering);
+        let view = View3d {
+            width: w,
+            height: h,
+            mode: self.mode,
+            camera,
+        };
+        let rgba = render::render_3d(&view, &scene.mesh, &scene.lines, &bbox);
+        let png = render::encode_png(&rgba, w, h)?;
+        let rendered = Rendered {
+            center: view.camera.center.to_array().to_vec(),
+            half_size: view.camera.half_size,
+            tolerance,
+            warnings: scene.warnings,
+            ms: ms_since(start),
+        };
+        Output::new(&rendered, png)
+    }
 }
 
 /// What a 3D render draws
@@ -421,7 +425,7 @@ fn scene(
 ////////////////////////////////////////////////////////////////////////////////
 // Export
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExportRequest {
     script: String,
@@ -452,26 +456,7 @@ pub async fn export(
         positive("tolerance", t)?;
     }
     check_script_len(&state, &req.script)?;
-
-    let st = state.clone();
-    let (out, ms) = state
-        .jobs
-        .run(move |ctx| {
-            let c = compile(&st, &req.script, ctx)?;
-            let start = Instant::now();
-            let out = if format.is_mesh() {
-                export_mesh(&st, ctx, &c.shape, format, req.tolerance)?
-            } else {
-                ctx.set_stage(Stage::Exporting);
-                Exported {
-                    bytes: export::exact(&c.shape, format)?,
-                    mesh: None,
-                    warnings: vec![],
-                }
-            };
-            Ok((out, ms_since(start)))
-        })
-        .await?;
+    let (out, bytes): (Exported, _) = state.jobs.run(Job::Export(format, req)).await?;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -483,30 +468,66 @@ pub async fn export(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&disposition).expect("ASCII file name"),
     );
-    headers.insert(X_COMPUTE_MS, ms_header(ms));
+    headers.insert(X_COMPUTE_MS, ms_header(out.ms));
     if let Some((triangles, tolerance)) = out.mesh {
         headers.insert(X_TRIANGLES, HeaderValue::from(triangles));
         headers.insert(X_TOLERANCE, number_header(&[tolerance]));
     }
     add_warnings(&mut headers, &out.warnings);
-    Ok((headers, out.bytes).into_response())
+    Ok((headers, bytes).into_response())
 }
 
-/// An exported file, with the triangle count and tolerance of a mesh
+/// How a file (which comes with it) was exported
+#[derive(Serialize, Deserialize)]
 struct Exported {
-    bytes: Vec<u8>,
+    /// The triangle count and tolerance of a mesh
     mesh: Option<(usize, f64)>,
     warnings: Vec<String>,
+    /// Time spent after the script, in milliseconds
+    ms: f64,
 }
 
+impl ExportRequest {
+    pub(crate) fn run(self, format: ExportFormat, ctx: &JobCtx) -> Result<Output, ApiError> {
+        let c = compile(&self.script, ctx)?;
+        let start = Instant::now();
+        let (bytes, mesh, warnings) = if format.is_mesh() {
+            export_mesh(ctx, &c.shape, format, self.tolerance)?
+        } else {
+            ctx.set_stage(Stage::Exporting);
+            (export::exact(&c.shape, format)?, None, vec![])
+        };
+        let max = ctx.settings.max_export_bytes;
+        if bytes.len() > max {
+            let hint = if format.is_mesh() {
+                "use a coarser tolerance or a simpler shape"
+            } else {
+                "simplify the shape"
+            };
+            return Err(ApiError::LimitExceeded(format!(
+                "the {} file is {} bytes; the limit is {max} ({hint})",
+                format.extension().to_uppercase(),
+                bytes.len(),
+            )));
+        }
+        let exported = Exported {
+            mesh,
+            warnings,
+            ms: ms_since(start),
+        };
+        Output::new(&exported, bytes)
+    }
+}
+
+/// The file, the triangle count and tolerance of the mesh, and warnings
+type MeshExport = (Vec<u8>, Option<(usize, f64)>, Vec<String>);
+
 fn export_mesh(
-    state: &AppState,
     ctx: &JobCtx,
     shape: &Shape,
     format: ExportFormat,
     requested: Option<f64>,
-) -> Result<Exported, ApiError> {
-    ctx.set_stage(Stage::Measuring);
+) -> Result<MeshExport, ApiError> {
     let bbox = measure::bounding_box(shape)?;
     let (tolerance, warning) = mesh::export_tolerance(requested, diagonal(&bbox));
     let mut warnings: Vec<String> = warning.into_iter().collect();
@@ -524,20 +545,10 @@ fn export_mesh(
         ));
     }
     ctx.set_stage(Stage::Meshing);
-    let welded = mesh::mesh(shape, tolerance, state.config.max_mesh_triangles)?.welded();
+    let welded = mesh::mesh(shape, tolerance, ctx.settings.max_mesh_triangles)?.welded();
     ctx.set_stage(Stage::Exporting);
     let bytes = export::mesh(&welded, format)?;
-    tracing::debug!(
-        triangles = welded.triangle_count(),
-        vertices = welded.vertex_count(),
-        tolerance,
-        "mesh built"
-    );
-    Ok(Exported {
-        bytes,
-        mesh: Some((welded.triangle_count(), tolerance)),
-        warnings,
-    })
+    Ok((bytes, Some((welded.triangle_count(), tolerance)), warnings))
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -584,8 +595,8 @@ mod tests {
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert!(positive("s", bad).is_err(), "{bad}");
         }
-        assert_eq!(dim("w", 1, 8).unwrap(), 1);
-        assert_eq!(dim("w", 8, 8).unwrap(), 8);
+        assert!(dim("w", 1, 8).is_ok());
+        assert!(dim("w", 8, 8).is_ok());
         assert!(matches!(dim("w", 0, 8), Err(ApiError::LimitExceeded(_))));
         assert!(matches!(dim("w", 9, 8), Err(ApiError::LimitExceeded(_))));
     }

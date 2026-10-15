@@ -1,5 +1,6 @@
 //! End-to-end tests of the `scratchcad` executable: startup, serving over TCP,
-//! configuration errors and graceful shutdown on signals.
+//! running jobs in worker processes, configuration errors and graceful
+//! shutdown on signals.
 
 #![cfg(unix)]
 
@@ -71,13 +72,28 @@ fn wait_exit(child: &mut Child) -> std::process::ExitStatus {
 }
 
 fn http_get(addr: &str, path: &str) -> String {
-    let mut s = TcpStream::connect(addr).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    write!(
-        s,
-        "GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n"
+    http(addr, &format!("GET {path} HTTP/1.1\r\n"))
+}
+
+fn http_post(addr: &str, path: &str, token: &str, body: &str) -> String {
+    http(
+        addr,
+        &format!(
+            "POST {path} HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\
+             Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
     )
-    .unwrap();
+}
+
+/// Sends a request (its first lines, up to the headers this adds) and reads
+/// the whole response
+fn http(addr: &str, request: &str) -> String {
+    let mut s = TcpStream::connect(addr).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let (head, body) = request.split_once("\r\n\r\n").unwrap_or((request, ""));
+    let head = head.trim_end_matches("\r\n");
+    write!(s, "{head}\r\nHost: test\r\nConnection: close\r\n\r\n{body}").unwrap();
     let mut out = String::new();
     s.read_to_string(&mut out).unwrap();
     out
@@ -134,6 +150,12 @@ fn text_logs_auth_and_sigint() {
     let res = http_get(&addr, "/readyz");
     assert!(res.starts_with("HTTP/1.1 200"), "{res}");
 
+    // Jobs run in a worker: this binary, as `scratchcad worker`
+    let script = r#"{"script": "box(10, 20, 30)"}"#;
+    let res = http_post(&addr, "/v1/scripts/validate", "0123456789abcdef", script);
+    assert!(res.starts_with("HTTP/1.1 200"), "{res}");
+    assert!(res.contains(r#""faces":6,"#), "{res}");
+
     signal(&child, "-INT");
     wait_for(&rx, "shutdown complete");
     assert!(wait_exit(&mut child).success());
@@ -163,4 +185,28 @@ fn invalid_config_fails_fast() {
     // Unbindable address
     let (mut child, _rx) = spawn(&[("SCRATCHCAD_LISTEN", "203.0.113.1:1")]);
     assert!(!wait_exit(&mut child).success());
+}
+
+#[test]
+fn worker_rejects_bad_requests() {
+    let mut child = command()
+        .arg("worker")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"[]").unwrap();
+    assert!(!wait_exit(&mut child).success());
+    let mut out = vec![];
+    child.stdout.take().unwrap().read_to_end(&mut out).unwrap();
+    assert!(out.is_empty(), "{out:?}");
+    let mut err = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut err)
+        .unwrap();
+    assert!(err.contains("expected struct Request"), "{err}");
 }

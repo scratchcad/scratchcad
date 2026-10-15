@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::{
     Router,
@@ -7,7 +7,7 @@ use axum::{
 };
 use clap::Parser;
 use http_body_util::BodyExt;
-use scratchcad::{AppState, config::Config};
+use scratchcad::{AppState, config::Config, jobs::Worker};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -18,7 +18,7 @@ const CUBE: &str = "draw(box_centered(20, 20, 20))";
 const PLATE: &str = "let plate = box_centered(40, 20, 4).translate([0, 0, 2]);
                      plate - cylinder([0, 0, -1], \"Z\", 4, 10)";
 
-/// Many booleans, for timeout tests: each cut checks the cancel token
+/// Many booleans, for timeout tests
 const HEAVY: &str = "let s = sphere(10);
                      for i in 0..100000 { s = s - cylinder([i % 7, 0, -20], \"Z\", 0.5, 40); }
                      s";
@@ -26,7 +26,7 @@ const HEAVY: &str = "let s = sphere(10);
 fn state_with(args: &[&str]) -> AppState {
     let config = Config::parse_from(std::iter::once("scratchcad").chain(args.iter().copied()));
     config.validate().unwrap();
-    AppState::new(config)
+    AppState::new(config, Worker::at(env!("CARGO_BIN_EXE_scratchcad")))
 }
 
 fn app_with(args: &[&str]) -> Router {
@@ -621,6 +621,45 @@ async fn export_errors() {
 }
 
 #[tokio::test]
+async fn face_limit() {
+    let app = app_with(&["--max-faces", "5"]);
+    for uri in ["/v1/scripts/validate", "/v1/export/step"] {
+        let r = post(&app, uri, json!({ "script": CUBE })).await;
+        assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "limit_exceeded");
+        assert_eq!(
+            error_message(&r),
+            "the shape has 6 faces; the limit is 5 (simplify it, or draw fewer parts at once)"
+        );
+    }
+    // Wires have no faces
+    post_ok(
+        &app,
+        "/v1/scripts/validate",
+        json!({ "script": "circle(5)" }),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn export_size_limit() {
+    let app = app_with(&["--max-export-bytes", "1000"]);
+    // Binary STL: an 84-byte header and 50 bytes per triangle
+    let (_, b) = post_ok(&app, "/v1/export/stl", json!({ "script": CUBE })).await;
+    assert_eq!(b.len(), 84 + 12 * 50);
+    let r = post(&app, "/v1/export/stl", json!({ "script": "sphere(10)" })).await;
+    assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "limit_exceeded");
+    let m = error_message(&r);
+    assert!(m.starts_with("the STL file is "), "{m}");
+    assert!(
+        m.ends_with("bytes; the limit is 1000 (use a coarser tolerance or a simpler shape)"),
+        "{m}"
+    );
+    let r = post(&app, "/v1/export/step", json!({ "script": CUBE })).await;
+    assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "limit_exceeded");
+    assert!(error_message(&r).ends_with("(simplify the shape)"));
+}
+
+#[tokio::test]
 async fn triangle_limit() {
     let app = app_with(&["--max-mesh-triangles", "10"]);
     for (uri, extra) in [
@@ -803,7 +842,7 @@ async fn timeout_message(args: &[&str], uri: &str, body: Value) -> String {
 }
 
 #[tokio::test]
-async fn job_timeout_cancels_script() {
+async fn job_timeout_stops_the_script() {
     let m = timeout_message(
         &["--job-timeout-ms", "100"],
         "/v1/scripts/validate",
@@ -827,7 +866,7 @@ async fn job_timeout_cancels_script() {
 }
 
 #[tokio::test]
-async fn job_timeout_cancels_meshing() {
+async fn job_timeout_stops_meshing() {
     // A sphere meshed at the finest tolerance allowed
     let m = timeout_message(
         &["--job-timeout-ms", "300"],
@@ -839,7 +878,7 @@ async fn job_timeout_cancels_meshing() {
 }
 
 #[tokio::test]
-async fn job_timeout_cancels_rendering() {
+async fn job_timeout_stops_rendering() {
     // Twelve triangles, but sixteen million samples to fill
     let m = timeout_message(
         &["--job-timeout-ms", "300"],
@@ -848,6 +887,72 @@ async fn job_timeout_cancels_rendering() {
     )
     .await;
     assert_eq!(m, "rendering exceeded the 0.3 s job budget");
+}
+
+#[tokio::test]
+async fn job_timeout_frees_the_slot_at_once() {
+    // Measuring thousands of spheres is OpenCASCADE work that can't be
+    // interrupted, but its worker can be killed.
+    let app = app_with(&["--job-timeout-ms", "600"]);
+    let script = "let a = []; for i in 0..5000 { a.push(sphere([i * 3, 0, 0], 1)); } a";
+    let start = Instant::now();
+    let r = post(&app, "/v1/scripts/validate", json!({ "script": script })).await;
+    assert_error(&r, StatusCode::GATEWAY_TIMEOUT, "timeout");
+    assert!(error_message(&r).ends_with("exceeded the 0.6 s job budget"));
+    assert!(
+        start.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        start.elapsed()
+    );
+    let (_, _, b) = call(&app, "GET", "/readyz", None).await;
+    assert_eq!(json_body(&b)["active_jobs"], 0);
+}
+
+#[tokio::test]
+async fn worker_cpu_limit() {
+    let app = app_with(&["--worker-cpu-seconds", "1", "--job-timeout-ms", "20000"]);
+    let r = post(&app, "/v1/scripts/validate", json!({ "script": HEAVY })).await;
+    assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "limit_exceeded");
+    assert!(
+        error_message(&r).starts_with("running the script used more than the worker's 1 s of CPU"),
+        "{}",
+        error_message(&r)
+    );
+}
+
+#[tokio::test]
+async fn worker_memory_limit() {
+    let app = app_with(&["--worker-memory-mib", "100"]);
+    // The frame buffers of a 2048 x 2048 render need more than that
+    let r = post(
+        &app,
+        "/v1/raster/3d",
+        json!({ "script": CUBE, "width": 2048, "height": 2048 }),
+    )
+    .await;
+    assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "limit_exceeded");
+    assert!(
+        error_message(&r).starts_with("rendering needed more than the worker's 100 MiB of memory"),
+        "{}",
+        error_message(&r)
+    );
+
+    // So does meshing a sphere this finely, and OpenCASCADE may crash
+    // rather than fail cleanly when it runs out.
+    let r = post(
+        &app,
+        "/v1/export/stl",
+        json!({ "script": "sphere(10)", "tolerance": 5e-4 }),
+    )
+    .await;
+    assert_eq!(r.0, StatusCode::UNPROCESSABLE_ENTITY);
+    let code = json_body(&r.2)["error"]["code"].clone();
+    let m = error_message(&r);
+    assert!(
+        code == "worker_crashed" || code == "limit_exceeded",
+        "{code}: {m}"
+    );
+    assert!(m.contains("meshing") && m.contains("100 MiB"), "{m}");
 }
 
 #[tokio::test]

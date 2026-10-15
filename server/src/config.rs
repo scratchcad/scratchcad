@@ -28,9 +28,18 @@ pub struct Config {
     #[arg(long, env = "SCRATCHCAD_QUEUE_TIMEOUT_MS", default_value_t = 5_000)]
     pub queue_timeout_ms: u64,
 
-    /// Wall-clock budget for a single job (script + measuring, rendering or export)
+    /// Wall-clock budget for a single job (script + measuring, rendering or
+    /// export); its worker process is killed when it runs out
     #[arg(long, env = "SCRATCHCAD_JOB_TIMEOUT_MS", default_value_t = 30_000)]
     pub job_timeout_ms: u64,
+
+    /// Heap memory (`RLIMIT_DATA`) each job's worker process may use, in MiB
+    #[arg(long, env = "SCRATCHCAD_WORKER_MEMORY_MIB", default_value_t = 2048)]
+    pub worker_memory_mib: u64,
+
+    /// CPU time each job's worker process may use, in seconds
+    #[arg(long, env = "SCRATCHCAD_WORKER_CPU_SECONDS", default_value_t = 60)]
+    pub worker_cpu_seconds: u64,
 
     /// Maximum request body size in bytes
     #[arg(long, env = "SCRATCHCAD_MAX_BODY_BYTES", default_value_t = 4 * 1024 * 1024)]
@@ -63,6 +72,19 @@ pub struct Config {
         default_value_t = 4_000_000
     )]
     pub max_mesh_triangles: usize,
+
+    /// Maximum number of faces in a shape; larger shapes are rejected before
+    /// they are measured, meshed or exported
+    #[arg(long, env = "SCRATCHCAD_MAX_FACES", default_value_t = 100_000)]
+    pub max_faces: usize,
+
+    /// Maximum size of an exported file in bytes
+    #[arg(
+        long,
+        env = "SCRATCHCAD_MAX_EXPORT_BYTES",
+        default_value_t = 128 * 1024 * 1024
+    )]
+    pub max_export_bytes: usize,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +120,10 @@ impl Config {
             ("max_image_size_2d", self.max_image_size_2d.into()),
             ("max_image_size_3d", self.max_image_size_3d.into()),
             ("max_mesh_triangles", self.max_mesh_triangles as u64),
+            ("max_faces", self.max_faces as u64),
+            ("max_export_bytes", self.max_export_bytes as u64),
+            ("worker_memory_mib", self.worker_memory_mib),
+            ("worker_cpu_seconds", self.worker_cpu_seconds),
         ];
         if let Some((name, _)) = nonzero.iter().find(|(_, v)| *v == 0) {
             return Err(format!("{name} must be at least 1"));
@@ -124,6 +150,8 @@ mod tests {
         assert!(parse(&[]).validate().is_ok());
         assert!(parse(&["--max-mesh-triangles", "0"]).validate().is_err());
         assert!(parse(&["--max-script-operations", "0"]).validate().is_err());
+        assert!(parse(&["--max-faces", "0"]).validate().is_err());
+        assert!(parse(&["--worker-memory-mib", "0"]).validate().is_err());
         assert!(parse(&["--api-token", "short"]).validate().is_err());
         assert!(
             parse(&["--max-body-bytes", "10", "--max-script-bytes", "20"])

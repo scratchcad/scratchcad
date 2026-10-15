@@ -2,6 +2,9 @@
 //! [scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs):
 //! run Rhai scripts that build B-rep solids, measure them, render them to PNG
 //! and export them as STEP, IGES, BREP, STL, OBJ or 3MF.
+//!
+//! The server never touches OpenCASCADE itself: each job runs in a worker
+//! process, a second mode of the same binary (see [`worker`] and [`jobs`]).
 
 pub mod api;
 pub mod config;
@@ -12,6 +15,7 @@ pub mod measure;
 pub mod mesh;
 pub mod render;
 pub mod script;
+pub mod worker;
 
 use std::sync::{
     Arc,
@@ -37,14 +41,17 @@ use tower_http::{
 };
 use tracing::Level;
 
-use crate::{config::Config, error::ApiError, jobs::Jobs, script::ScriptLimits};
+use crate::{
+    config::Config,
+    error::ApiError,
+    jobs::{Jobs, Worker},
+};
 
 #[derive(Clone)]
 pub struct AppState(Arc<Inner>);
 
 pub struct Inner {
     pub config: Config,
-    pub limits: ScriptLimits,
     pub jobs: Jobs,
     draining: AtomicBool,
     /// SHA-256 of the API token, compared in constant time
@@ -59,22 +66,15 @@ impl std::ops::Deref for AppState {
 }
 
 impl AppState {
-    pub fn new(config: Config) -> Self {
-        let limits = ScriptLimits {
-            max_operations: config.max_script_operations,
-            max_string_size: config.max_script_bytes,
-        };
-        let jobs = Jobs::new(
-            config.max_concurrent_jobs,
-            config.queue_timeout(),
-            config.job_timeout(),
-        );
+    /// The service's state; jobs run in `worker`, normally
+    /// [`Worker::current_exe`]
+    pub fn new(config: Config, worker: Worker) -> Self {
+        let jobs = Jobs::new(&config, worker);
         let token_hash = config
             .api_token
             .as_deref()
             .map(|t| Sha256::digest(t.as_bytes()).into());
         Self(Arc::new(Inner {
-            limits,
             jobs,
             draining: AtomicBool::new(false),
             token_hash,
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn state_starts_ready() {
         let config = <Config as clap::Parser>::parse_from(["scratchcad"]);
-        let state = AppState::new(config);
+        let state = AppState::new(config, Worker::at("scratchcad"));
         assert!(!state.is_draining());
         assert!(state.token_hash.is_none());
         assert_eq!(state.jobs.active(), 0);

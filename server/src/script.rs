@@ -6,15 +6,17 @@
 //! result is a B-rep [`Shape`]; nothing is retained between requests.
 //!
 //! Shapes and the engine are neither `Send` nor `Sync`, so the engine is built
-//! per call, inside the job that uses the shape.
+//! per call, inside the worker process that runs the job (see `worker`).
 
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use scratchcad_occt_rhai::{
-    CancelToken, ErrorKind, Selection, Shape, Sketch, error_kind,
+    ErrorKind, Selection, Shape, Sketch, error_kind,
     rhai::{self, Dynamic, EvalAltResult},
     to_shape,
 };
+
+use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
 
@@ -23,7 +25,7 @@ const MAX_OUTPUT_LINES: usize = 100;
 /// Maximum length of a single captured output line
 const MAX_OUTPUT_LINE_LEN: usize = 1024;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ScriptLimits {
     pub max_operations: u64,
     pub max_string_size: usize,
@@ -41,21 +43,15 @@ pub struct Compiled {
 type Output = Rc<RefCell<Vec<String>>>;
 
 /// Builds a Rhai engine with the OpenCASCADE bindings and sandbox limits applied
-fn engine(limits: &ScriptLimits, cancel: CancelToken, output: Output) -> rhai::Engine {
+fn engine(limits: &ScriptLimits, output: Output) -> rhai::Engine {
     // Registers every modelling function, with no filesystem access: `import`
     // resolves nothing, and error tags are read-only.
     let mut engine = scratchcad_occt_rhai::engine();
 
     // Resource limits.  The operation cap counts Rhai operations, not the
-    // work an OpenCASCADE call does, so long calls are stopped by the job's
-    // cancel token instead (see `jobs`).  The token is also checked between
-    // operations, so timeouts interrupt long-running script loops.
+    // work an OpenCASCADE call does; long calls are stopped by killing the
+    // worker process when the job's time is up (see `jobs`).
     engine.set_max_operations(limits.max_operations);
-    engine.on_progress(move |_| {
-        cancel
-            .is_cancelled()
-            .then(|| Dynamic::from("script cancelled"))
-    });
     engine.set_max_call_levels(64);
     engine.set_max_expr_depths(64, 32);
     engine.set_max_string_size(limits.max_string_size);
@@ -97,17 +93,11 @@ fn is_shaped(value: &Dynamic) -> bool {
     value.is::<Shape>() || value.is::<Selection>() || value.is::<Sketch>() || value.is_array()
 }
 
-/// Executes a script and returns the shape it produced.  Call it inside a
-/// job: the job's cancel token stops OpenCASCADE operations, and `cancel`
-/// (the same token) stops the script between operations.
-pub fn compile(
-    src: &str,
-    limits: &ScriptLimits,
-    cancel: &CancelToken,
-) -> Result<Compiled, ApiError> {
+/// Executes a script and returns the shape it produced
+pub fn compile(src: &str, limits: &ScriptLimits) -> Result<Compiled, ApiError> {
     let start = Instant::now();
     let output = Output::default();
-    let mut engine = engine(limits, cancel.clone(), output.clone());
+    let mut engine = engine(limits, output.clone());
 
     let drawn: Rc<RefCell<Option<Shape>>> = Rc::default();
     let slot = drawn.clone();
@@ -137,14 +127,12 @@ pub fn compile(
         .map_err(|e| ApiError::Script(e.to_string()))?;
     let result = engine
         .eval_ast::<Dynamic>(&ast)
-        .map_err(|e| map_eval_error(*e, limits, cancel))?;
+        .map_err(|e| map_eval_error(*e, limits))?;
 
     let drawn = drawn.borrow_mut().take();
     let shape = match drawn {
         Some(shape) => shape,
-        None if is_shaped(&result) => {
-            to_shape(result).map_err(|e| map_eval_error(*e, limits, cancel))?
-        }
+        None if is_shaped(&result) => to_shape(result).map_err(|e| map_eval_error(*e, limits))?,
         None => {
             return Err(ApiError::Script(format!(
                 "script must call draw(shape) or evaluate to a shape, \
@@ -169,15 +157,12 @@ pub fn compile(
     })
 }
 
-fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits, cancel: &CancelToken) -> ApiError {
-    match error_kind(&e) {
-        Some(ErrorKind::Cancelled) => return ApiError::cancelled(),
-        // Scripts cannot touch files, but the kind is mapped like an export's.
-        Some(ErrorKind::Io) => return ApiError::ExportFailed(e.to_string()),
-        _ => {}
+fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits) -> ApiError {
+    // Scripts cannot touch files, but the kind is mapped like an export's.
+    if error_kind(&e) == Some(ErrorKind::Io) {
+        return ApiError::ExportFailed(e.to_string());
     }
     match e {
-        EvalAltResult::ErrorTerminated(..) if cancel.is_cancelled() => ApiError::cancelled(),
         EvalAltResult::ErrorTooManyOperations(pos) => {
             let at = if pos.is_none() {
                 String::new()
@@ -202,7 +187,7 @@ fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits, cancel: &CancelToken)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scratchcad_occt_rhai::{Error, ShapeType, rhai::Position, with_cancel};
+    use scratchcad_occt_rhai::{Error, ShapeType, rhai::Position};
 
     fn limits() -> ScriptLimits {
         ScriptLimits {
@@ -212,7 +197,7 @@ mod tests {
     }
 
     fn run(src: &str) -> Result<Compiled, ApiError> {
-        compile(src, &limits(), &CancelToken::new())
+        compile(src, &limits())
     }
 
     fn script_error(src: &str) -> String {
@@ -279,9 +264,7 @@ mod tests {
             max_operations: 100,
             ..limits()
         };
-        let Err(ApiError::LimitExceeded(m)) =
-            compile("let t = 0;\nloop { t += 1; }", &l, &CancelToken::new())
-        else {
+        let Err(ApiError::LimitExceeded(m)) = compile("let t = 0;\nloop { t += 1; }", &l) else {
             panic!("expected a limit error")
         };
         assert!(m.contains("budget of 100 operations at line 2"), "{m}");
@@ -299,59 +282,35 @@ mod tests {
             run("fn f(n) { f(n + 1) } f(0)"),
             Err(ApiError::LimitExceeded(_))
         ));
-        // Error tags are read-only, so a script cannot forge a cancellation.
+        // Error tags are read-only, so a script cannot forge an error kind.
         let m = script_error("let e = \"x\"; e.tag = 9; throw e;");
         assert!(m.contains("read-only"), "{m}");
     }
 
     #[test]
-    fn cancellation_interrupts_script() {
-        let c = CancelToken::new();
-        c.cancel();
-        let l = ScriptLimits {
-            max_operations: 0, // unlimited
-            ..limits()
-        };
-        assert!(matches!(
-            compile("loop {}", &l, &c),
-            Err(ApiError::Timeout(_))
-        ));
-        // An OpenCASCADE operation under a cancelled token fails as cancelled
-        let r = with_cancel(&c, || {
-            compile("cube(2) - sphere(1)", &l, &CancelToken::new())
-        });
-        assert!(matches!(r, Err(ApiError::Timeout(_))), "{:?}", r.err());
-    }
-
-    #[test]
     fn error_kinds_map_to_api_errors() {
-        let c = CancelToken::new();
         let e = |error: Error| *Box::<EvalAltResult>::from(error);
         assert!(matches!(
-            map_eval_error(e(Error::Cancelled), &limits(), &c),
-            ApiError::Timeout(_)
-        ));
-        assert!(matches!(
-            map_eval_error(e(Error::Io("disk".into())), &limits(), &c),
+            map_eval_error(e(Error::Io("disk".into())), &limits()),
             ApiError::ExportFailed(m) if m.contains("disk")
         ));
         assert!(matches!(
-            map_eval_error(e(Error::OperationFailed("fillet")), &limits(), &c),
+            map_eval_error(e(Error::OperationFailed("fillet")), &limits()),
             ApiError::Script(m) if m.contains("fillet failed")
         ));
         let terminated = EvalAltResult::ErrorTerminated(Dynamic::UNIT, Position::NONE);
         assert!(matches!(
-            map_eval_error(terminated, &limits(), &c),
+            map_eval_error(terminated, &limits()),
             ApiError::Script(_)
         ));
         let large = EvalAltResult::ErrorDataTooLarge("array".into(), Position::NONE);
         assert!(matches!(
-            map_eval_error(large, &limits(), &c),
+            map_eval_error(large, &limits()),
             ApiError::LimitExceeded(m) if m.contains("size limit")
         ));
         let ops = EvalAltResult::ErrorTooManyOperations(Position::NONE);
         assert!(matches!(
-            map_eval_error(ops, &limits(), &c),
+            map_eval_error(ops, &limits()),
             ApiError::LimitExceeded(m) if m.ends_with("operations")
         ));
     }
@@ -400,11 +359,7 @@ mod tests {
             max_string_size: 64,
             ..limits()
         };
-        let r = compile(
-            "let s = \"a\"; for i in 0..10 { s += s; } cube(1)",
-            &l,
-            &CancelToken::new(),
-        );
+        let r = compile("let s = \"a\"; for i in 0..10 { s += s; } cube(1)", &l);
         assert!(matches!(r, Err(ApiError::LimitExceeded(m)) if m.contains("size")));
     }
 }

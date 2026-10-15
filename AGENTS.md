@@ -61,9 +61,12 @@ CI also builds the compose images (`docker compose config --quiet`, then the dev
 * **Scripts never touch files.** The server is stateless; scratchcad-occt-rhai's `register` gives
   scripts no file functions and `import` loads nothing. Keep it that way: only the MCP server reads
   and writes files, inside its output directory.
-* **A `Shape` stays on one thread.** Shapes (and the Rhai engine, without Rhai's `sync` feature,
-  which must stay off) are not `Send`. Build the engine, run the script, mesh, render and export
-  inside one job (`jobs.rs`), and return bytes or plain data. `shape.detach()` exists if a shape
-  must cross threads.
-* **OpenCASCADE output goes through `set_message_handler`.** OCCT prints to stdout, which carries
-  the server's logs; `main.rs` routes its messages to `tracing` before any thread starts.
+* **OpenCASCADE runs only in workers.** Each job runs in a `scratchcad worker` process
+  (`worker.rs`), which `jobs.rs` kills on timeout or disconnect and which limits its own memory and
+  CPU time. The server never touches a `Shape`: the worker runs the script, measures, meshes,
+  renders and exports, and sends back bytes and plain data. A job's request and result types must
+  stay serializable. Shapes (and the Rhai engine, without Rhai's `sync` feature, which must stay
+  off) are not `Send`, so keep each job on one thread.
+* **A worker's stdout is the protocol.** `worker::main` points stdout at stderr before anything
+  else runs, and routes OpenCASCADE's messages to stderr through `set_message_handler`; the server
+  logs the worker's stderr. Never print to the protocol channel.
