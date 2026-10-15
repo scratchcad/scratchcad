@@ -416,32 +416,80 @@ fn rasterize(frame: &mut Frame, tri: [Projected; 3], mode: Mode3d) -> usize {
     x1.saturating_sub(x0) * y1.saturating_sub(y0)
 }
 
+/// The parameters `[t0, t1]` of the part of the segment `a + t (b - a)`,
+/// `t` in `[0, 1]`, that lies within `[lo, hi]` (Liang-Barsky), if any.
+/// Lines are clipped to the image before they are stepped along, so the work
+/// is bounded by the image's size, however far the view is zoomed in.
+fn clip_to_rect(a: DVec2, b: DVec2, lo: DVec2, hi: DVec2) -> Option<[f64; 2]> {
+    let d = b - a;
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    for (p, q) in [
+        (-d.x, a.x - lo.x),
+        (d.x, hi.x - a.x),
+        (-d.y, a.y - lo.y),
+        (d.y, hi.y - a.y),
+    ] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+        } else {
+            let t = q / p;
+            if p < 0.0 {
+                t0 = t0.max(t);
+            } else {
+                t1 = t1.min(t);
+            }
+        }
+    }
+    (t0 <= t1).then_some([t0, t1])
+}
+
+/// The part of the segment `a`-`b` over the pixels (with a one-pixel
+/// margin, for line width), as the parameters of its ends
+fn clip_to_pixels(a: DVec2, b: DVec2, px: Pixels) -> Option<[f64; 2]> {
+    let hi = DVec2::new(px.width as f64 + 1.0, px.height as f64 + 1.0);
+    clip_to_rect(a, b, DVec2::splat(-1.0), hi)
+}
+
+/// Marks the samples about one output pixel wide around `p`
+fn stamp(covered: &mut [bool], px: Pixels, p: DVec2, mut mark: impl FnMut(usize)) {
+    for (dx, dy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+        let (x, y) = ((p.x - 0.5).floor() + dx, (p.y - 0.5).floor() + dy);
+        if x >= 0.0 && y >= 0.0 && x < px.width as f64 && y < px.height as f64 {
+            let i = y as usize * px.width + x as usize;
+            covered[i] = true;
+            mark(i);
+        }
+    }
+}
+
 /// Draws a line segment over the surfaces, hidden where a surface is nearer
 /// than the line by more than `bias`
 fn draw_line(frame: &mut Frame, a: Projected, b: Projected, bias: f64) {
     let px = frame.px;
-    let steps = (b.x - a.x).abs().max((b.y - a.y).abs()).ceil().min(1e5) as usize + 1;
+    let (a2, b2) = (DVec2::new(a.x, a.y), DVec2::new(b.x, b.y));
+    let Some([t0, t1]) = clip_to_pixels(a2, b2, px) else {
+        return;
+    };
+    // Screen depth is linear along the line on screen
+    let (p, q) = (a2.lerp(b2, t0), a2.lerp(b2, t1));
+    let (za, zb) = (a.z + (b.z - a.z) * t0, a.z + (b.z - a.z) * t1);
+    let steps = (q - p).abs().max_element().ceil() as usize + 1;
     for k in 0..=steps {
         let t = k as f64 / steps as f64;
-        let (x, y) = (a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
-        let (cx, cy) = (x.floor(), y.floor());
+        let point = p.lerp(q, t);
+        let (cx, cy) = (point.x.floor(), point.y.floor());
         if cx < 0.0 || cy < 0.0 || cx >= px.width as f64 || cy >= px.height as f64 {
             continue;
         }
-        let z = a.z + (b.z - a.z) * t;
+        let z = za + (zb - za) * t;
         let center = cy as usize * px.width + cx as usize;
         if f64::from(frame.depth[center]) > z + bias {
             continue;
         }
-        // About one output pixel wide
-        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            let (sx, sy) = ((x - 0.5).floor() + dx as f64, (y - 0.5).floor() + dy as f64);
-            if sx >= 0.0 && sy >= 0.0 && sx < px.width as f64 && sy < px.height as f64 {
-                let i = sy as usize * px.width + sx as usize;
-                frame.color[i] = EDGE;
-                frame.covered[i] = true;
-            }
-        }
+        let color = &mut frame.color;
+        stamp(&mut frame.covered, px, point, |i| color[i] = EDGE);
     }
 }
 
@@ -625,70 +673,85 @@ impl View2d {
 }
 
 /// Renders section segments white on black: filled by the even-odd rule
-/// ([`Mode2d::Mono`]) or as an outline
-pub fn render_2d(view: &View2d, segments: &[[DVec2; 2]]) -> Vec<u8> {
+/// ([`Mode2d::Mono`]) or as an outline.  The work is bounded by the image's
+/// size and the number of segments, however far the view is zoomed in, and
+/// stops when `cancel` is tripped.
+pub fn render_2d(
+    view: &View2d,
+    segments: &[[DVec2; 2]],
+    cancel: &CancelToken,
+) -> Result<Vec<u8>, ApiError> {
     let px = Pixels::new(view.width, view.height);
     let to_pixel = |p: DVec2| {
         let s = (p - view.center) / view.half_size;
         let (x, y) = px.to_pixel(s.x, s.y);
         DVec2::new(x, y)
     };
-    let segments: Vec<[DVec2; 2]> = segments.iter().map(|s| s.map(to_pixel)).collect();
     let mut covered = vec![false; px.len()];
-    match view.mode {
-        Mode2d::Mono => {
-            // Where each row of sample centers crosses the outline
-            let mut crossings: Vec<Vec<f64>> = vec![vec![]; px.height];
-            for [a, b] in &segments {
+    for (i, segment) in segments.iter().enumerate() {
+        if i % CANCEL_EVERY == 0 && cancel.is_cancelled() {
+            return Err(ApiError::cancelled());
+        }
+        let [a, b] = segment.map(to_pixel);
+        match view.mode {
+            Mode2d::Mono => {
+                // Even-odd fill by toggling: each row of sample centers the
+                // segment crosses flips the samples from the crossing to the
+                // row's end, which the pass below accumulates. A crossing
+                // left of the image flips the whole row; one right of it,
+                // nothing in it.
                 let (lo, hi) = if a.y < b.y { (a, b) } else { (b, a) };
                 // Rows whose center y lies in [lo.y, hi.y)
                 let first = (lo.y - 0.5).ceil().max(0.0) as usize;
                 let end = ((hi.y - 0.5).ceil().max(0.0) as usize).min(px.height);
-                for (row, xs) in crossings.iter_mut().enumerate().take(end).skip(first) {
+                for row in first..end {
                     let y = row as f64 + 0.5;
-                    xs.push(lo.x + (hi.x - lo.x) * (y - lo.y) / (hi.y - lo.y));
-                }
-            }
-            for (row, xs) in crossings.iter_mut().enumerate() {
-                xs.sort_by(f64::total_cmp);
-                for [start, stop] in xs.as_chunks::<2>().0 {
-                    let first = (start - 0.5).ceil().max(0.0) as usize;
-                    let end = ((stop - 0.5).ceil().max(0.0) as usize).min(px.width);
-                    for x in first..end {
-                        covered[row * px.width + x] = true;
+                    let x = lo.x + (hi.x - lo.x) * (y - lo.y) / (hi.y - lo.y);
+                    let column = (x - 0.5).ceil().max(0.0);
+                    if column < px.width as f64 {
+                        let i = row * px.width + column as usize;
+                        covered[i] = !covered[i];
                     }
                 }
             }
-        }
-        Mode2d::Outline => {
-            for [a, b] in &segments {
-                let steps = (b.x - a.x).abs().max((b.y - a.y).abs()).ceil().min(1e5) as usize + 1;
+            Mode2d::Outline => {
+                let Some([t0, t1]) = clip_to_pixels(a, b, px) else {
+                    continue;
+                };
+                let (p, q) = (a.lerp(b, t0), a.lerp(b, t1));
+                let steps = (q - p).abs().max_element().ceil() as usize + 1;
                 for k in 0..=steps {
-                    let p = a.lerp(*b, k as f64 / steps as f64);
-                    for (dx, dy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
-                        let (x, y) = ((p.x - 0.5).floor() + dx, (p.y - 0.5).floor() + dy);
-                        if x >= 0.0 && y >= 0.0 && x < px.width as f64 && y < px.height as f64 {
-                            covered[y as usize * px.width + x as usize] = true;
-                        }
-                    }
+                    stamp(&mut covered, px, p.lerp(q, k as f64 / steps as f64), |_| {});
                 }
             }
         }
     }
-    let frame = Frame {
-        px,
-        depth: vec![],
-        color: vec![[255; 3]; px.len()],
-        covered,
-    };
+    if view.mode == Mode2d::Mono {
+        for row in covered.chunks_mut(px.width) {
+            let mut inside = false;
+            for sample in row {
+                inside ^= *sample;
+                *sample = inside;
+            }
+        }
+    }
+
     // White where covered, over an opaque black background
-    frame
-        .downsample()
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|&[.., level]| [level, level, level, 255])
-        .collect()
+    let (w, h) = (px.width / SS, px.height / SS);
+    let mut out = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let mut n = 0;
+            for sy in 0..SS {
+                for sx in 0..SS {
+                    n += usize::from(covered[(y * SS + sy) * px.width + x * SS + sx]);
+                }
+            }
+            let level = (n * 255 / (SS * SS)) as u8;
+            out.extend([level, level, level, 255]);
+        }
+    }
+    Ok(out)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -984,7 +1047,7 @@ mod tests {
         let bbox = shape.bounding_box().unwrap();
         let segments = section(&shape.mesh(0.01).unwrap().welded());
         let view = View2d::framing(&bbox, size, mode, None, None);
-        render_2d(&view, &segments)
+        render_2d(&view, &segments, &CancelToken::new()).unwrap()
     }
 
     #[test]
@@ -1010,6 +1073,97 @@ mod tests {
         // About four sides of 29 pixels, one or two pixels wide
         assert!((80..=300).contains(&lit), "{lit}");
         assert_eq!(&img[(16 * 32 + 16) * 4..][..4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn segments_clip_to_rectangles() {
+        let (lo, hi) = (DVec2::ZERO, DVec2::splat(10.0));
+        let clip = |a: [f64; 2], b: [f64; 2]| {
+            clip_to_rect(DVec2::from_array(a), DVec2::from_array(b), lo, hi)
+        };
+        assert_eq!(clip([1.0, 1.0], [9.0, 9.0]), Some([0.0, 1.0]));
+        assert_eq!(clip([-10.0, 5.0], [30.0, 5.0]), Some([0.25, 0.5]));
+        assert_eq!(clip([30.0, 5.0], [-10.0, 5.0]), Some([0.5, 0.75]));
+        assert_eq!(clip([-5.0, -5.0], [-1.0, 20.0]), None);
+        assert_eq!(clip([0.0, 20.0], [10.0, 30.0]), None);
+        assert_eq!(clip([5.0, 5.0], [5.0, 5.0]), Some([0.0, 1.0]));
+        assert_eq!(clip([5.0, 15.0], [5.0, 15.0]), None);
+    }
+
+    fn view_2d(mode: Mode2d) -> View2d {
+        View2d {
+            width: 32,
+            height: 16,
+            mode,
+            center: DVec2::ZERO,
+            half_size: 2.0,
+        }
+    }
+
+    fn render_segments(mode: Mode2d, segments: &[[DVec2; 2]]) -> Vec<u8> {
+        render_2d(&view_2d(mode), segments, &CancelToken::new()).unwrap()
+    }
+
+    #[test]
+    fn lines_far_longer_than_the_image_are_drawn_whole() {
+        // A billion times the view's width: stepping along all of it would
+        // take forever, and capping the steps would leave gaps.
+        let line = [DVec2::new(-1e9, 0.1), DVec2::new(1e9, 0.1)];
+        let img = render_segments(Mode2d::Outline, &[line]);
+        for x in 0..32 {
+            let column = (0..16).map(|y| img[(y * 32 + x) * 4]).max().unwrap();
+            assert!(column > 0, "gap at column {x}");
+        }
+        // Entirely outside the view: nothing
+        let away = [DVec2::new(-1e9, 50.0), DVec2::new(1e9, 50.0)];
+        let img = render_segments(Mode2d::Outline, &[away]);
+        assert!(pixels(&img).iter().all(|p| *p == [0, 0, 0, 255]));
+
+        // The same in 3D: a line across the whole view, depth-tested
+        let camera = Camera::new(DVec3::ZERO, 1.0, &Rotation::default(), 0.0);
+        let view = View3d {
+            width: 16,
+            height: 16,
+            mode: Mode3d::Shaded,
+            camera,
+        };
+        let bbox = unit_box();
+        let line = [[DVec3::new(-1e9, 0.05, 0.0), DVec3::new(1e9, 0.05, 0.0)]];
+        let img = render_3d(&view, &Mesh::default(), &line, &bbox, &CancelToken::new()).unwrap();
+        for x in 0..16 {
+            let column = (0..16).map(|y| img[(y * 16 + x) * 4 + 3]).max().unwrap();
+            assert!(column > 0, "gap at column {x}");
+        }
+    }
+
+    #[test]
+    fn even_odd_fill_counts_crossings_left_of_the_image() {
+        // A rectangle reaching far past the left of the view and ending at x = 1
+        let (l, r, b, t) = (-1e9, 1.0, -0.5, 0.5);
+        let corners = [[l, b], [r, b], [r, t], [l, t]].map(DVec2::from_array);
+        let outline: Vec<_> = (0..4).map(|i| [corners[i], corners[(i + 1) % 4]]).collect();
+        let img = render_segments(Mode2d::Mono, &outline);
+        let at = |x: usize, y: usize| img[(y * 32 + x) * 4];
+        // The view is x = ±2 by y = ±1, so x = 1 is three quarters of the way
+        // across and y = ±0.5 a quarter of the way from the top and bottom.
+        assert_eq!(at(0, 8), 255, "left edge, inside");
+        assert_eq!(at(23, 8), 255, "just inside x = 1");
+        assert_eq!(at(25, 8), 0, "right of x = 1");
+        assert_eq!(at(0, 2), 0, "above y = 0.5");
+        assert_eq!(at(0, 13), 0, "below y = -0.5");
+    }
+
+    #[test]
+    fn cancelled_sections_stop() {
+        let cancel = CancelToken::new();
+        cancel.cancel();
+        let segment = [[DVec2::ZERO, DVec2::X]];
+        for mode in [Mode2d::Mono, Mode2d::Outline] {
+            assert!(matches!(
+                render_2d(&view_2d(mode), &segment, &cancel),
+                Err(ApiError::Timeout(_))
+            ));
+        }
     }
 
     #[test]

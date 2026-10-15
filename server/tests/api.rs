@@ -370,6 +370,27 @@ async fn raster_2d_warns_when_the_plane_misses() {
     assert!(warnings(&h)[0].starts_with("the section at z = 0 is empty"));
 }
 
+#[tokio::test]
+async fn raster_2d_work_is_bounded_by_the_image() {
+    // Thousands of section segments seen through a microscopic window.
+    // Stepping along each one in full would take billions of steps and run
+    // past the job budget; drawing is bounded by the image instead.
+    let script = "let a = []; for i in 0..100 { a.push(sphere([i * 3, 0, 0], 1)); } a";
+    let app = app_with(&["--job-timeout-ms", "20000"]);
+    for mode in ["mono", "outline"] {
+        let (_, b) = post_ok(
+            &app,
+            "/v1/raster/2d",
+            json!({
+                "script": script, "width": 256, "height": 256, "mode": mode,
+                "center": [1.0, 0.0], "half_size": 1e-9,
+            }),
+        )
+        .await;
+        assert_eq!(png(&b).dimensions(), (256, 256));
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // 3D renders
 

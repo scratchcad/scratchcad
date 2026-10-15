@@ -264,7 +264,8 @@ pub async fn raster_2d(
                 segments
             };
             ctx.set_stage(Stage::Rendering);
-            let png = render::encode_png(&render::render_2d(&view, &segments), w, h)?;
+            let rgba = render::render_2d(&view, &segments, &ctx.cancel)?;
+            let png = render::encode_png(&rgba, w, h)?;
             Ok((
                 Rendered {
                     png,
