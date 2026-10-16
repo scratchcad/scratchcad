@@ -3,16 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Client } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vitest";
-import { GUIDE } from "../src/guide.ts";
+import { EXAMPLES, GUIDE } from "../src/guide.ts";
 import {
   connect,
   FakeScratchcad,
   PNG,
   response,
   SCRIPT,
+  SHAPE,
   scratchcadError,
   TOOLS,
   testSettings,
+  VALIDATED,
 } from "./helpers.ts";
 
 type Content = { type: string; text?: string; data?: string; mimeType?: string };
@@ -51,16 +53,21 @@ describe("discovery", () => {
     const { client } = await setup();
     expect(client.getInstructions()).toBe(GUIDE);
     for (const needle of [
+      "OpenCASCADE",
+      "Z is up",
+      "millimetres",
       "draw(shape)",
-      "difference(",
+      "box_centered(",
+      "fillet(",
+      "sketch(",
+      '">Z"',
       "degrees",
-      "half_size",
-      "negative",
-      "finite",
+      "try {",
+      "validate_script",
       "save_script",
       "read_script",
       "editor_url",
-      "call export_stl when the user asks",
+      "Only call export when the user asks",
       "// [10, 60]",
       "Label (unit)",
       "// # Head",
@@ -68,6 +75,11 @@ describe("discovery", () => {
     ]) {
       expect(GUIDE).toContain(needle);
     }
+    // The examples are in the guide as they are run by the integration tests
+    for (const example of Object.values(EXAMPLES)) {
+      expect(GUIDE).toContain(example.split("\n")[0]);
+    }
+    expect(GUIDE).not.toMatch(/half_size=|region|implicit|negative inside/i);
   });
 
   it("documents every parameter", async () => {
@@ -91,7 +103,7 @@ describe("discovery", () => {
     const tools = Object.fromEntries((await client.listTools()).tools.map((t) => [t.name, t]));
     for (const name of TOOLS) {
       const annotations = tools[name]!.annotations!;
-      if (name === "export_stl" || name === "save_script") {
+      if (name === "export" || name === "save_script") {
         expect(annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
       } else {
         expect(annotations).toMatchObject({ readOnlyHint: true, idempotentHint: true });
@@ -110,20 +122,21 @@ describe("discovery", () => {
     expect(props.render_3d!.perspective!.maximum).toBe(1);
     expect(props.render_3d!.width!.minimum).toBe(1);
     expect(props.render_3d!.mode!.enum).toEqual(["shaded", "normals", "heightmap"]);
-    expect(props.render_2d!.mode!.enum).toEqual(["mono", "sdf", "debug"]);
-    expect(props.evaluate!.mode!.enum).toEqual(["value", "gradient", "interval"]);
-    expect(props.export_stl!.half_size!.exclusiveMinimum).toBe(0);
-    expect(Object.keys(props.export_stl!)).toEqual(
-      expect.arrayContaining(["path", "overwrite", "depth"]),
+    expect(props.render_3d!.half_size!.exclusiveMinimum).toBe(0);
+    expect(props.render_2d!.mode!.enum).toEqual(["mono", "outline"]);
+    expect(props.export!.tolerance!.exclusiveMinimum).toBe(0);
+    expect(Object.keys(props.export!)).toEqual(
+      expect.arrayContaining(["path", "overwrite", "tolerance"]),
     );
+    expect(Object.keys(props.save_script!).sort()).toEqual(["overwrite", "path", "script"]);
   });
 });
 
 describe("validate_script", () => {
-  it("validates", async () => {
+  it("describes the shape", async () => {
     const { client, fake } = await setup();
     const result = await call(client, "validate_script", { script: SCRIPT });
-    expect(result.structuredContent).toEqual({ nodes: 9, output: ["hi"], compile_ms: 0.8 });
+    expect(result.structuredContent).toEqual(VALIDATED);
     expect(JSON.parse(result.content[0]!.text!)).toEqual(result.structuredContent);
     expect(fake.last.url.pathname).toBe("/v1/scripts/validate");
     expect(fake.last.body).toEqual({ script: SCRIPT });
@@ -148,106 +161,54 @@ describe("validate_script", () => {
   });
 });
 
-describe("evaluate", () => {
-  it("defaults to value mode", async () => {
-    const { client, fake } = await setup();
-    const result = await call(client, "evaluate", { script: SCRIPT, points: [[0, 0, 0]] });
-    expect(result.structuredContent).toEqual({ values: [-1], compute_ms: 0.02 });
-    expect(fake.last.url.pathname).toBe("/v1/eval");
-    expect(fake.last.body).toEqual({ script: SCRIPT, mode: "value", points: [[0, 0, 0]] });
-  });
-
-  it("passes gradient mode and the evaluator", async () => {
-    const { client, fake } = await setup();
-    await call(client, "evaluate", {
-      script: SCRIPT,
-      mode: "gradient",
-      points: [[1, 2, 3]],
-      evaluator: "vm",
-    });
-    expect(fake.last.body).toEqual({
-      script: SCRIPT,
-      mode: "gradient",
-      points: [[1, 2, 3]],
-      evaluator: "vm",
-    });
-  });
-
-  it("passes interval mode", async () => {
-    const { client, fake } = await setup();
-    const box = [
-      [-1, 1],
-      [-1, 1],
-      [-1, 1],
-    ];
-    await call(client, "evaluate", { script: SCRIPT, mode: "interval", intervals: [box] });
-    expect(fake.last.body).toEqual({ script: SCRIPT, mode: "interval", intervals: [box] });
-  });
-
-  it("rejects malformed points locally", async () => {
-    const { client, fake } = await setup();
-    expect(await callError(client, "evaluate", { script: SCRIPT, points: [[1, 2]] })).toContain(
-      "points",
-    );
-    expect(fake.requests).toEqual([]);
-  });
-});
-
 describe("render_2d and render_3d", () => {
-  it("render_2d returns the PNG", async () => {
+  it("render_2d returns the PNG and the view it fitted", async () => {
     const { client, fake } = await setup();
     const result = await call(client, "render_2d", { script: SCRIPT });
     expect(result.content).toEqual([
       { type: "image", data: PNG.toString("base64"), mimeType: "image/png" },
+      {
+        type: "text",
+        text:
+          "View: center=[0,0] half_size=16.2. Pass them back to keep this framing, or a " +
+          "smaller half_size to zoom in.",
+      },
     ]);
     expect(fake.last.url.pathname).toBe("/v1/raster/2d");
-    expect(fake.last.body).toEqual({
-      script: SCRIPT,
-      width: 512,
-      height: 512,
-      mode: "mono",
-      center: [0, 0],
-      half_size: 1,
-    });
+    // No center or half_size: scratchcad fits the part
+    expect(fake.last.body).toEqual({ script: SCRIPT, width: 512, height: 512, mode: "mono" });
   });
 
   it("render_2d passes every option", async () => {
     const { client, fake } = await setup();
-    const args = {
-      width: 64,
-      height: 32,
-      mode: "sdf",
-      center: [1, -1],
-      half_size: 3,
-      evaluator: "jit",
-    };
+    const args = { width: 64, height: 32, mode: "outline", center: [1, -1], half_size: 3 };
     await call(client, "render_2d", { script: SCRIPT, ...args });
     expect(fake.last.body).toEqual({ script: SCRIPT, ...args });
   });
 
-  it.each(["render_2d", "render_3d"])("%s puts warnings after the image", async (tool) => {
+  it.each(["render_2d", "render_3d"])("%s puts warnings last", async (tool) => {
     const { client, fake } = await setup();
     fake.handler = () =>
-      response(200, PNG, { "x-warning": ["the field is NaN at (0, 0, 0)", "second"] });
+      response(200, PNG, { "x-warning": ["the plane z = 0 misses the part", "second"] });
     const result = await call(client, tool, { script: SCRIPT });
+    // Without view headers there is no view text
     expect(result.content.map((c) => c.type)).toEqual(["image", "text", "text"]);
-    expect(result.content[1]!.text).toBe("Warning: the field is NaN at (0, 0, 0)");
+    expect(result.content[1]!.text).toBe("Warning: the plane z = 0 misses the part");
   });
 
-  it("render_3d defaults to a three-quarter view", async () => {
+  it("render_3d defaults to a three-quarter view from the front right", async () => {
     const { client, fake } = await setup();
     const result = await call(client, "render_3d", { script: SCRIPT });
-    expect(result.content).toHaveLength(1);
+    expect(result.content).toHaveLength(2);
+    expect(result.content[1]!.text).toContain("center=[0,0,0] half_size=21.5");
     expect(fake.last.url.pathname).toBe("/v1/raster/3d");
     expect(fake.last.body).toEqual({
       script: SCRIPT,
       width: 512,
       height: 512,
       mode: "shaded",
-      ssao: true,
-      center: [0, 0, 0],
-      half_size: 1,
-      rotation: { yaw: 30, pitch: -20, roll: 0 },
+      edges: true,
+      rotation: { yaw: 0, pitch: 65, roll: 30 },
       perspective: 0,
     });
   });
@@ -258,36 +219,26 @@ describe("render_2d and render_3d", () => {
       script: SCRIPT,
       width: 256,
       height: 128,
-      depth: 64,
       yaw: 90,
       pitch: 45,
       roll: 10,
       center: [1, 2, 3],
       half_size: 20,
-      ssao: false,
+      mode: "normals",
+      edges: false,
       perspective: 0.5,
-      evaluator: "vm",
     });
     expect(fake.last.body).toEqual({
       script: SCRIPT,
       width: 256,
       height: 128,
-      depth: 64,
-      mode: "shaded",
-      ssao: false,
+      mode: "normals",
+      edges: false,
       center: [1, 2, 3],
       half_size: 20,
       rotation: { yaw: 90, pitch: 45, roll: 10 },
       perspective: 0.5,
-      evaluator: "vm",
     });
-  });
-
-  it.each(["normals", "heightmap"])("render_3d leaves out ssao in %s mode", async (mode) => {
-    const { client, fake } = await setup();
-    await call(client, "render_3d", { script: SCRIPT, mode, ssao: true });
-    expect(fake.last.body.mode).toBe(mode);
-    expect(fake.last.body).not.toHaveProperty("ssao");
   });
 
   it.each([
@@ -297,9 +248,9 @@ describe("render_2d and render_3d", () => {
     { perspective: 1.5 },
     { perspective: -0.1 },
     { half_size: 0 },
-    { depth: 0 },
     { mode: "wireframe" },
-    { evaluator: "gpu" },
+    { evaluator: "vm" },
+    { ssao: true },
     { center: [1, 2] },
     { unknown: 1 },
   ])("render_3d rejects %o locally", async (args) => {
@@ -309,89 +260,102 @@ describe("render_2d and render_3d", () => {
   });
 });
 
-describe("export_stl", () => {
-  it("writes the file", async () => {
+describe("export", () => {
+  it("writes a mesh", async () => {
     const { client, fake, out } = await setup();
-    const result = await call(client, "export_stl", { script: SCRIPT, path: "part.stl" });
+    const result = await call(client, "export", { script: SCRIPT, path: "part.stl" });
     const target = path.join(out, "part.stl");
     expect(result.structuredContent).toEqual({
       path: target,
-      bytes: 11,
+      format: "stl",
+      bytes: 10,
       triangles: 1234,
+      tolerance: 0.0374,
       compute_ms: 40.25,
       warnings: [],
     });
-    expect(fs.readFileSync(target, "utf8")).toBe("solid-bytes");
+    expect(fs.readFileSync(target, "utf8")).toBe("mesh-bytes");
     expect(fake.last.url.pathname).toBe("/v1/export/stl");
-    expect(fake.last.body).toEqual({ script: SCRIPT, center: [0, 0, 0], half_size: 1, depth: 6 });
+    expect(fake.last.body).toEqual({ script: SCRIPT });
+  });
+
+  it.each([
+    ["part.step", "step"],
+    ["part.STP", "step"],
+    ["part.igs", "iges"],
+    ["part.brep", "brep"],
+    ["part.obj", "obj"],
+    ["part.3mf", "3mf"],
+  ])("picks the format of %s from its extension", async (target, format) => {
+    const { client, fake, out } = await setup();
+    const result = await call(client, "export", { script: SCRIPT, path: target });
+    expect(result.structuredContent!.format).toBe(format);
+    expect(fake.last.url.pathname).toBe(`/v1/export/${format}`);
+    expect(fs.existsSync(path.join(out, target))).toBe(true);
+  });
+
+  it("passes a tolerance for meshes, and refuses one for exact formats", async () => {
+    const { client, fake } = await setup();
+    await call(client, "export", { script: SCRIPT, path: "p.3mf", tolerance: 0.05 });
+    expect(fake.last.body).toEqual({ script: SCRIPT, tolerance: 0.05 });
+    const requests = fake.requests.length;
+    const text = await callError(client, "export", {
+      script: SCRIPT,
+      path: "p.step",
+      tolerance: 0.05,
+    });
+    expect(text).toBe(
+      "tolerance only applies to mesh formats (stl, obj, 3mf); step stores exact geometry",
+    );
+    expect(fake.requests).toHaveLength(requests);
   });
 
   it("reports warnings", async () => {
     const { client, fake, out } = await setup();
     fake.handler = () =>
-      response(200, Buffer.from("solid-bytes"), {
+      response(200, Buffer.from("mesh-bytes"), {
         "x-triangle-count": "8",
-        "x-warning": "the shape reaches the boundary on its -x, +x side(s)",
+        "x-warning": "the shape is a face with no solids, so the mesh is not watertight",
       });
-    const result = await call(client, "export_stl", { script: SCRIPT, path: "part.stl" });
+    const result = await call(client, "export", { script: SCRIPT, path: "part.stl" });
     expect(result.structuredContent!.warnings).toEqual([
-      "the shape reaches the boundary on its -x, +x side(s)",
+      "the shape is a face with no solids, so the mesh is not watertight",
     ]);
     expect(fs.existsSync(path.join(out, "part.stl"))).toBe(true);
   });
 
-  it("passes every option", async () => {
-    const { client, fake } = await setup();
-    await call(client, "export_stl", {
-      script: SCRIPT,
-      path: "p.stl",
-      center: [1, 1, 1],
-      half_size: 15,
-      depth: 8,
-      evaluator: "vm",
-    });
-    expect(fake.last.body).toEqual({
-      script: SCRIPT,
-      center: [1, 1, 1],
-      half_size: 15,
-      depth: 8,
-      evaluator: "vm",
-    });
-  });
-
   it("creates subdirectories and accepts absolute paths inside the output directory", async () => {
     const { client, out } = await setup();
-    await call(client, "export_stl", { script: SCRIPT, path: "parts/v2/bracket.STL" });
-    expect(fs.readFileSync(path.join(out, "parts/v2/bracket.STL"), "utf8")).toBe("solid-bytes");
-    await call(client, "export_stl", { script: SCRIPT, path: path.join(out, "abs.stl") });
-    expect(fs.existsSync(path.join(out, "abs.stl"))).toBe(true);
+    await call(client, "export", { script: SCRIPT, path: "parts/v2/bracket.STL" });
+    expect(fs.readFileSync(path.join(out, "parts/v2/bracket.STL"), "utf8")).toBe("mesh-bytes");
+    await call(client, "export", { script: SCRIPT, path: path.join(out, "abs.step") });
+    expect(fs.existsSync(path.join(out, "abs.step"))).toBe(true);
   });
 
   it("refuses to overwrite by default", async () => {
     const { client, fake, out } = await setup();
     const target = path.join(out, "part.stl");
     fs.writeFileSync(target, "original");
-    const text = await callError(client, "export_stl", { script: SCRIPT, path: "part.stl" });
+    const text = await callError(client, "export", { script: SCRIPT, path: "part.stl" });
     expect(text).toContain("already exists");
     expect(text).toContain("overwrite");
     expect(fs.readFileSync(target, "utf8")).toBe("original");
     expect(fake.requests).toEqual([]);
-    await call(client, "export_stl", { script: SCRIPT, path: "part.stl", overwrite: true });
-    expect(fs.readFileSync(target, "utf8")).toBe("solid-bytes");
+    await call(client, "export", { script: SCRIPT, path: "part.stl", overwrite: true });
+    expect(fs.readFileSync(target, "utf8")).toBe("mesh-bytes");
   });
 
   it.each([
     ["../escape.stl", "inside the output directory"],
     ["/etc/evil.stl", "inside the output directory"],
     ["sub/../../escape.stl", "inside the output directory"],
-    ["part.obj", "end in .stl"],
-    ["part", "end in .stl"],
+    ["part.dxf", "end in .step, .stp, .iges, .igs, .brep, .brp, .stl, .obj or .3mf"],
+    ["part.rhai", "end in .step"],
+    ["part", "end in .step"],
     ["   ", "must not be empty"],
   ])("rejects the path %s", async (target, message) => {
     const { client, fake } = await setup();
-    expect(await callError(client, "export_stl", { script: SCRIPT, path: target })).toContain(
-      message,
-    );
+    expect(await callError(client, "export", { script: SCRIPT, path: target })).toContain(message);
     expect(fake.requests).toEqual([]);
   });
 
@@ -399,7 +363,7 @@ describe("export_stl", () => {
     const { client, out } = await setup();
     const outside = testSettings().outputDir;
     fs.symlinkSync(outside, path.join(out, "link"));
-    expect(await callError(client, "export_stl", { script: SCRIPT, path: "link/x.stl" })).toContain(
+    expect(await callError(client, "export", { script: SCRIPT, path: "link/x.stl" })).toContain(
       "inside the output directory",
     );
     expect(fs.readdirSync(outside)).toEqual([]);
@@ -411,14 +375,14 @@ describe("export_stl", () => {
     fs.symlinkSync(real, alias);
     const fake = new FakeScratchcad();
     const client = await connect(testSettings({ outputDir: alias }), fake);
-    await call(client, "export_stl", { script: SCRIPT, path: "part.stl" });
-    expect(fs.readFileSync(path.join(real, "part.stl"), "utf8")).toBe("solid-bytes");
+    await call(client, "export", { script: SCRIPT, path: "part.stl" });
+    expect(fs.readFileSync(path.join(real, "part.stl"), "utf8")).toBe("mesh-bytes");
   });
 
   it("rejects a directory target", async () => {
     const { client, fake, out } = await setup();
     fs.mkdirSync(path.join(out, "folder.stl"));
-    const text = await callError(client, "export_stl", {
+    const text = await callError(client, "export", {
       script: SCRIPT,
       path: "folder.stl",
       overwrite: true,
@@ -429,36 +393,40 @@ describe("export_stl", () => {
 
   it("writes nothing when scratchcad fails", async () => {
     const { client, fake, out } = await setup();
-    fake.handler = scratchcadError(422, "limit_exceeded", "mesh has too many triangles");
-    const text = await callError(client, "export_stl", { script: SCRIPT, path: "big.stl" });
-    expect(text.startsWith("limit_exceeded: mesh has too many triangles")).toBe(true);
-    expect(fs.existsSync(path.join(out, "big.stl"))).toBe(false);
+    fake.handler = scratchcadError(422, "empty_mesh", "the shape is a wire with no faces");
+    const text = await callError(client, "export", { script: "circle(5)", path: "w.stl" });
+    expect(text.startsWith("empty_mesh: the shape is a wire with no faces")).toBe(true);
+    expect(fs.existsSync(path.join(out, "w.stl"))).toBe(false);
   });
 });
 
 describe("save_script and read_script", () => {
-  it("validates and writes the script with a region line", async () => {
+  it("validates and writes the script", async () => {
     const { client, fake, out } = await setup("http://localhost:8000/");
     const result = await call(client, "save_script", {
       script: SCRIPT,
-      path: "parts/my ball.rhai",
-      center: [1, 2, 3],
-      half_size: 2.5,
+      path: "parts/my part.rhai",
     });
-    const text = `// region: center=[1, 2, 3] half_size=2.5\n${SCRIPT}\n`;
-    expect(fs.readFileSync(path.join(out, "parts/my ball.rhai"), "utf8")).toBe(text);
+    const text = `${SCRIPT}\n`;
+    expect(fs.readFileSync(path.join(out, "parts/my part.rhai"), "utf8")).toBe(text);
     expect(result.structuredContent).toEqual({
-      path: path.join(out, "parts/my ball.rhai"),
+      path: path.join(out, "parts/my part.rhai"),
       bytes: text.length,
-      nodes: 9,
-      center: [1, 2, 3],
-      half_size: 2.5,
-      editor_url: "http://localhost:8000/?open=parts%2Fmy%20ball.rhai",
+      shape: SHAPE,
+      warnings: [],
+      editor_url: "http://localhost:8000/?open=parts%2Fmy%20part.rhai",
       parameters: [],
       notes: [expect.stringContaining("no parameters, so the user gets no sliders")],
     });
     expect(fake.last.url.pathname).toBe("/v1/scripts/validate");
     expect(fake.last.body).toEqual({ script: SCRIPT });
+  });
+
+  it("passes on the shape's warnings", async () => {
+    const { client, fake } = await setup();
+    fake.handler = () => response(200, { ...VALIDATED, warnings: ["the shape has no solids"] });
+    const result = await call(client, "save_script", { script: "circle(5)", path: "c.rhai" });
+    expect(result.structuredContent!.warnings).toEqual(["the shape has no solids"]);
   });
 
   it("lists the sliders the script makes, and what's unclear about them", async () => {
@@ -467,7 +435,7 @@ describe("save_script and read_script", () => {
       "// # Body",
       "let width = 20.0; // [5, 50] Width (mm)",
       "let depth = 8.0;",
-      SCRIPT,
+      "box(width, depth, 2)",
     ].join("\n");
     const result = await call(client, "save_script", { script, path: "a.rhai" });
     expect(result.structuredContent!.parameters).toEqual([
@@ -486,23 +454,20 @@ describe("save_script and read_script", () => {
     expect(result.structuredContent!.editor_url).toBeNull();
   });
 
-  it("keeps or replaces an existing region line", async () => {
+  it("keeps the script as written, apart from trailing blank lines", async () => {
     const { client, out } = await setup();
-    const script = `// region: center=[0, 0, 5] half_size=12\n${SCRIPT}`;
+    // Scripts saved before the region line went away still run: it's a comment.
+    const script = `// region: center=[0, 0, 5] half_size=12\n${SCRIPT}\n\n\n`;
     await call(client, "save_script", { script, path: "a.rhai" });
-    expect(fs.readFileSync(path.join(out, "a.rhai"), "utf8")).toBe(`${script}\n`);
-    await call(client, "save_script", { script, path: "b.rhai", half_size: 20 });
-    expect(fs.readFileSync(path.join(out, "b.rhai"), "utf8")).toMatch(
-      /^\/\/ region: center=\[0, 0, 5\] half_size=20\n/,
+    expect(fs.readFileSync(path.join(out, "a.rhai"), "utf8")).toBe(
+      `// region: center=[0, 0, 5] half_size=12\n${SCRIPT}\n`,
     );
   });
 
-  it("defaults to the unit region", async () => {
-    const { client, out } = await setup();
-    await call(client, "save_script", { script: SCRIPT, path: "a.rhai" });
-    expect(fs.readFileSync(path.join(out, "a.rhai"), "utf8")).toBe(
-      `// region: center=[0, 0, 0] half_size=1\n${SCRIPT}\n`,
-    );
+  it("rejects the old region arguments", async () => {
+    const { client, fake } = await setup();
+    await callError(client, "save_script", { script: SCRIPT, path: "a.rhai", half_size: 2 });
+    expect(fake.requests).toEqual([]);
   });
 
   it("writes nothing for an invalid script", async () => {
@@ -538,25 +503,13 @@ describe("save_script and read_script", () => {
     expect(fake.requests).toEqual([]);
   });
 
-  it("reads a script and its region", async () => {
+  it("reads a script", async () => {
     const { client, fake, out } = await setup();
     const text = `// region: center=[0, -1, 0] half_size=4\n${SCRIPT}\n`;
     fs.writeFileSync(path.join(out, "a.rhai"), text);
     const result = await call(client, "read_script", { path: "a.rhai" });
-    expect(result.structuredContent).toEqual({
-      path: path.join(out, "a.rhai"),
-      script: text,
-      center: [0, -1, 0],
-      half_size: 4,
-    });
+    expect(result.structuredContent).toEqual({ path: path.join(out, "a.rhai"), script: text });
     expect(fake.requests).toEqual([]);
-  });
-
-  it("reads a script without a region line", async () => {
-    const { client, out } = await setup();
-    fs.writeFileSync(path.join(out, "a.rhai"), SCRIPT);
-    const result = await call(client, "read_script", { path: "a.rhai" });
-    expect(result.structuredContent).toMatchObject({ center: null, half_size: null });
   });
 
   it("explains read errors", async () => {
@@ -573,10 +526,9 @@ describe("save_script and read_script", () => {
 describe("errors shared by every tool", () => {
   it.each([
     ["validate_script", {}],
-    ["evaluate", { points: [[0, 0, 0]] }],
     ["render_2d", {}],
     ["render_3d", {}],
-    ["export_stl", { path: "x.stl" }],
+    ["export", { path: "x.stl" }],
     ["save_script", { path: "x.rhai" }],
   ])("%s reports an unreachable server", async (tool, args) => {
     const settings = testSettings();

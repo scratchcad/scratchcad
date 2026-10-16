@@ -2,7 +2,7 @@
 // HTTP mode) the MCP endpoint, all on one port.
 //
 //   GET  /                          the editor
-//   GET  /api/files                 scripts and meshes in the output directory
+//   GET  /api/files                 scripts and exports in the output directory
 //   GET  /api/files/<path>          one file, with its version in x-version
 //   PUT  /api/files/<path>          write one, checking x-expected-version
 //   POST /api/scratchcad/v1/...     forwarded to scratchcad, token added here
@@ -19,27 +19,33 @@ import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import type { McpServer } from "@modelcontextprotocol/server";
 import express, { type ErrorRequestHandler, type Express, type Response } from "express";
 import { ScratchcadError, type ScratchcadClient } from "./client.ts";
+import { EXPORT_EXTENSIONS, FORMAT_INFO, formatOf } from "./shared/formats.ts";
 import * as workspace from "./workspace.ts";
-import { MESH, SCRIPT, WorkspaceError } from "./workspace.ts";
+import { FILES, SCRIPT, WorkspaceError } from "./workspace.ts";
 
 // Upload limits for the file API.
 export const MAX_SCRIPT_BYTES = 1024 * 1024;
-export const MAX_MESH_BYTES = 256 * 1024 * 1024;
+export const MAX_EXPORT_BYTES = 256 * 1024 * 1024;
 
-// The scratchcad endpoints the editor may call through the proxy.
+// The scratchcad endpoints the editor may call through the proxy: one export
+// route per extension, as scratchcad takes them all.
 const PROXIED = [
   "/v1/scripts/validate",
-  "/v1/eval",
   "/v1/raster/2d",
   "/v1/raster/3d",
-  "/v1/export/stl",
+  ...EXPORT_EXTENSIONS.map((extension) => `/v1/export/${extension.slice(1)}`),
 ];
-// Response headers passed back to the editor.
+// Response headers passed back to the editor. Warnings go in x-warnings, as
+// a JSON array: fetch() joins repeated headers with ", ", which is ambiguous
+// when a warning itself contains a comma.
 const FORWARDED_HEADERS = [
   "content-type",
+  "content-disposition",
   "x-compute-ms",
   "x-triangle-count",
-  "x-warning",
+  "x-mesh-tolerance",
+  "x-view-center",
+  "x-view-half-size",
   "x-request-id",
 ];
 
@@ -125,14 +131,14 @@ export function createApp({
     const relative = relativePath(req.params);
     let target: string;
     try {
-      target = workspace.resolve(outputDir, relative, [SCRIPT, MESH]);
+      target = workspace.resolve(outputDir, relative, FILES);
     } catch (error) {
       return fail(res, 400, "invalid_path", (error as Error).message);
     }
     if (!workspace.isFile(target)) return fail(res, 404, "not_found", `${relative} does not exist`);
-    const mesh = path.extname(target).toLowerCase() === MESH;
+    const format = formatOf(target);
     res.set({
-      "content-type": mesh ? "model/stl" : "text/plain; charset=utf-8",
+      "content-type": format ? FORMAT_INFO[format].contentType : "text/plain; charset=utf-8",
       "cache-control": "no-cache",
       "x-version": workspace.version(target),
     });
@@ -148,12 +154,12 @@ export function createApp({
 
   app.put(
     "/api/files/*path",
-    express.raw({ type: () => true, limit: MAX_MESH_BYTES }),
+    express.raw({ type: () => true, limit: MAX_EXPORT_BYTES }),
     (req, res) => {
       const relative = relativePath(req.params);
       let target: string;
       try {
-        target = workspace.resolve(outputDir, relative, [SCRIPT, MESH]);
+        target = workspace.resolve(outputDir, relative, FILES);
       } catch (error) {
         return fail(res, 400, "invalid_path", (error as WorkspaceError).message);
       }
@@ -167,7 +173,7 @@ export function createApp({
       }
       const data = req.body;
       const isScript = path.extname(target).toLowerCase() === SCRIPT;
-      const limit = isScript ? MAX_SCRIPT_BYTES : MAX_MESH_BYTES;
+      const limit = isScript ? MAX_SCRIPT_BYTES : MAX_EXPORT_BYTES;
       if (data.length > limit) {
         return fail(res, 413, "too_large", `${relative} is larger than ${limit} bytes`);
       }
@@ -205,8 +211,17 @@ export function createApp({
       const response = await client.forward(endpoint, JSON.stringify(req.body ?? {}));
       res.status(response.status);
       for (const name of FORWARDED_HEADERS) {
-        const values = response.headers[name];
-        if (values) res.set(name, values.length === 1 ? values[0] : values);
+        const value = response.headers[name]?.[0];
+        if (value !== undefined) res.set(name, value);
+      }
+      const warnings = response.headers["x-warning"];
+      if (warnings) {
+        // Escaped to ASCII, as header values must be.
+        const ascii = JSON.stringify(warnings).replace(
+          /[^\x20-\x7e]/g,
+          (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+        );
+        res.set("x-warnings", ascii);
       }
       res.end(response.body);
     } catch (error) {

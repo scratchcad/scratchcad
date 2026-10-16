@@ -77,14 +77,19 @@ export class ScratchcadError extends Error {
   }
 }
 
-/** A PNG or STL response, with the metadata scratchcad sends in headers. */
+/** A render or an exported file, with the metadata scratchcad sends in headers. */
 export interface BinaryResult {
   data: Buffer;
   computeMs: number | null;
+  /** Triangles in an exported mesh. */
   triangles: number | null;
+  /** How closely the mesh behind a render or mesh export follows the surface. */
+  tolerance: number | null;
+  /** The view a render shows: center ± half_size. */
+  view: { center: number[]; halfSize: number } | null;
   /**
    * The request worked, but the result may not be what was meant (for
-   * example a mesh cut open where the part leaves the meshed region).
+   * example a section plane that misses the part).
    */
   warnings: string[];
 }
@@ -109,10 +114,6 @@ export class ScratchcadClient {
     return json(await this.post("/v1/scripts/validate", body));
   }
 
-  async eval(body: Body): Promise<Body> {
-    return json(await this.post("/v1/eval", body));
-  }
-
   async raster2d(body: Body): Promise<BinaryResult> {
     return binary(await this.post("/v1/raster/2d", body));
   }
@@ -121,8 +122,9 @@ export class ScratchcadClient {
     return binary(await this.post("/v1/raster/3d", body));
   }
 
-  async exportStl(body: Body): Promise<BinaryResult> {
-    return binary(await this.post("/v1/export/stl", body));
+  /** The shape as a file: `format` is step, iges, brep, stl, obj or 3mf. */
+  async export(format: string, body: Body): Promise<BinaryResult> {
+    return binary(await this.post(`/v1/export/${format}`, body));
   }
 
   /**
@@ -166,20 +168,29 @@ function json(response: RawResponse): Body {
   return JSON.parse(response.body.toString("utf8")) as Body;
 }
 
-function headerNumber(response: RawResponse, name: string, integer: boolean): number | null {
+/** Comma-separated numbers, or null if the header is missing or garbled. */
+function headerNumbers(response: RawResponse, name: string): number[] | null {
   const value = header(response, name);
   if (value === null) return null;
-  const number = Number(value);
-  if (value.trim() === "" || !Number.isFinite(number)) return null;
-  if (integer && !Number.isInteger(number)) return null;
-  return number;
+  const numbers = value.split(",").map((part) => (part.trim() === "" ? NaN : Number(part)));
+  return numbers.every(Number.isFinite) ? numbers : null;
+}
+
+function headerNumber(response: RawResponse, name: string, integer = false): number | null {
+  const [number] = headerNumbers(response, name) ?? [null];
+  if (number === null || (integer && !Number.isInteger(number))) return null;
+  return number!;
 }
 
 function binary(response: RawResponse): BinaryResult {
+  const center = headerNumbers(response, "x-view-center");
+  const halfSize = headerNumber(response, "x-view-half-size");
   return {
     data: response.body,
-    computeMs: headerNumber(response, "x-compute-ms", false),
+    computeMs: headerNumber(response, "x-compute-ms"),
     triangles: headerNumber(response, "x-triangle-count", true),
+    tolerance: headerNumber(response, "x-mesh-tolerance"),
+    view: center && halfSize !== null ? { center, halfSize } : null,
     warnings: response.headers["x-warning"] ?? [],
   };
 }
@@ -222,7 +233,7 @@ export function errorFrom(response: RawResponse): ScratchcadError {
   } else if (code === "overloaded") {
     hint = " (the server is busy; retry in a moment)";
   } else if (code === "limit_exceeded") {
-    hint = " (reduce the size, resolution or complexity of the request)";
+    hint = " (reduce the size, resolution, tolerance or complexity of the request)";
   }
   return new ScratchcadError(`${code}: ${message}${hint}${trace}`, code, status);
 }

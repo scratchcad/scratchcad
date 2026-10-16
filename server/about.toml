@@ -2,6 +2,11 @@
 # ../THIRD_PARTY_LICENSES.txt; see ../mcp/scripts/third-party-licenses.ts.
 # Generation fails if a dependency uses a license not listed here, so a new
 # license (e.g. GPL) gets a deliberate review before it ships.
+#
+# LGPL-2.1-only covers scratchcad-occt-rhai and scratchcad-occt-sys, which
+# bind OpenCASCADE (itself LGPL-2.1, with an exception, and credited
+# separately, since it is not a crate). They are linked into an Apache-2.0
+# binary, which the LGPL allows because scratchcad's source is public.
 accepted = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -15,6 +20,7 @@ accepted = [
     "Unicode-3.0",
     "CC0-1.0",
     "Unlicense",
+    "LGPL-2.1-only",
 ]
 # Platforms scratchcad is built for: the Docker images, and native builds.
 targets = [

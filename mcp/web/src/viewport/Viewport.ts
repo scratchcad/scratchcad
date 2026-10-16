@@ -1,8 +1,8 @@
 // The 3D view: an STL mesh with orbit controls, a ground grid and a view
 // cube. Plain three.js, owned by the React <ViewportView> component.
 //
-// Axes follow render_3d: +y is up and the unrotated camera looks along -z, so
-// the view cube's Front face is +z and its Top face is +y.
+// Axes follow CAD (and the scripts): +z is up, so the ground grid lies in the
+// XY plane, the view cube's Top face is +z and its Front face is -y.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
@@ -70,9 +70,13 @@ export class Viewport {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(window.devicePixelRatio);
 
-    this.camera.position.set(1, 1, 2);
+    // Before the controls are made: they orbit about the camera's up axis.
+    this.camera.up.set(0, 0, 1);
+    this.camera.position.set(1, -2, 1);
     this.scene.add(this.camera);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 1.6));
+    const sky = new THREE.HemisphereLight(0xffffff, 0x8888aa, 1.6);
+    sky.position.set(0, 0, 1);
+    this.scene.add(sky);
     const headlight = new THREE.DirectionalLight(0xffffff, 1.6);
     headlight.position.set(0.5, 1, 1);
     this.camera.add(headlight);
@@ -114,12 +118,14 @@ export class Viewport {
 
     const box = geometry.boundingBox!;
     const size = box.getSize(new THREE.Vector3());
-    const extent = Math.max(size.x, size.z, 1e-6) * 2;
+    const extent = Math.max(size.x, size.y, 1e-6) * 2;
     this.grid = new THREE.GridHelper(extent, 20, 0x888888, 0x888888);
     const gridMaterial = this.grid.material as THREE.Material;
     gridMaterial.opacity = 0.25;
     gridMaterial.transparent = true;
-    this.grid.position.set((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2);
+    // GridHelper lies in the XZ plane; stand it in the XY plane, under the part.
+    this.grid.rotation.x = Math.PI / 2;
+    this.grid.position.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.min.z);
     this.scene.add(this.grid);
 
     if (framing === "reset") this.frame();
@@ -164,7 +170,8 @@ export class Viewport {
     this.fly = null;
     if (!this.mesh) return;
     const sphere = this.sphere();
-    const direction = new THREE.Vector3(0.6, 0.45, 1).normalize();
+    // From the front right, a little above, as render_3d's default.
+    const direction = new THREE.Vector3(0.6, -1, 0.45).normalize();
     const distance = this.distanceFor(sphere.radius);
     this.camera.position.copy(sphere.center).addScaledVector(direction, distance);
     this.controls.target.copy(sphere.center);
@@ -242,7 +249,7 @@ export class Viewport {
     const end = direction.clone().normalize();
     // OrbitControls can't look exactly along the up axis, so tilt the top and
     // bottom views a hair towards the front.
-    if (Math.abs(end.y) > 0.999) end.set(0, Math.sign(end.y), 1e-3).normalize();
+    if (Math.abs(end.z) > 0.999) end.set(0, -1e-3, Math.sign(end.z)).normalize();
     const start = this.camera.position.clone().sub(this.controls.target).normalize();
     this.turn = {
       start,
@@ -306,13 +313,17 @@ class ViewCube {
     light.position.set(0.5, 1, 1);
     this.camera.add(light);
 
-    // BoxGeometry's face order is +x, -x, +y, -y, +z, -z.
+    // BoxGeometry's face order is +x, -x, +y, -y, +z, -z, labelled as if +y
+    // were up; turning the cube a quarter about x stands it up in Z-up space,
+    // with each label upright: Top at +z, Front at -y.
     this.cube = new THREE.Mesh(
       new THREE.BoxGeometry(2, 2, 2),
       ["Right", "Left", "Top", "Bottom", "Front", "Back"].map(
         (label) => new THREE.MeshLambertMaterial({ map: faceTexture(label) }),
       ),
     );
+    this.cube.rotation.x = Math.PI / 2;
+    this.cube.updateMatrixWorld();
     this.scene.add(this.cube);
     this.scene.add(
       new THREE.LineSegments(
@@ -382,8 +393,8 @@ class ViewCube {
 
   /**
    * Where the pointer looks from: the face it is over, plus the neighbouring
-   * face(s) near an edge or corner. (1, 0, 0) is the Right face, (1, 1, 0)
-   * the top-right edge, (1, 1, 1) a corner.
+   * face(s) near an edge or corner. (1, 0, 0) is the Right face, (1, 0, 1)
+   * the top-right edge, (1, -1, 1) the top-front-right corner.
    */
   private pick(event: PointerEvent): THREE.Vector3 | null {
     const rect = this.canvas.getBoundingClientRect();

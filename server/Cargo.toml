@@ -2,30 +2,33 @@
 name = "scratchcad"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.98"
-description = "HTTP API for Fidget: Rhai scripting, point evaluation, rasterization and STL export"
+rust-version = "1.99"
+description = "HTTP API for OpenCASCADE B-rep modelling: Rhai scripting, measuring, rendering and STEP/IGES/BREP/STL/OBJ/3MF export"
 license = "Apache-2.0"
 publish = false
 
 [dependencies]
-fidget = { version = "=0.5.1", default-features = false, features = ["jit", "mesh", "raster", "rhai", "shapes"] }
-rhai = { version = "1.26.1", features = ["sync"] }
-nalgebra = "0.35.0"
-rayon = "1.12.0"
+scratchcad-occt-rhai = "=0.2.0"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+# 3MF packages are ZIP archives of deflated XML
+flate2 = "1.1.10"
+crc32fast = "1.5.2"
 
 axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "json", "macros", "tokio", "tracing"] }
-tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "io-util", "macros", "net", "process", "signal", "sync", "time"] }
 tower = { version = "0.5.3", features = ["limit", "load-shed", "timeout", "util"] }
 tower-http = { version = "0.7.1", features = ["catch-panic", "limit", "request-id", "sensitive-headers", "set-header", "timeout", "trace", "util"] }
 
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+# Workers send their results to the server as JSON; floats must survive it
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 clap = { version = "4.6.7", features = ["derive", "env"] }
 thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 sha2 = "0.11.0"
+# Worker processes: resource limits and file descriptors, without `unsafe`
+rustix = { version = "1.1.5", features = ["process", "stdio"] }
 
 [dev-dependencies]
 http-body-util = "0.1.5"
@@ -34,6 +37,6 @@ tower = { version = "0.5.3", features = ["util"] }
 [profile.release]
 lto = "thin"
 codegen-units = 1
-# Keep unwinding so a panic inside a render job is contained to one request.
+# Keep unwinding so a panic inside a job is contained to one request.
 panic = "unwind"
 overflow-checks = true

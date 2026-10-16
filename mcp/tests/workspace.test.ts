@@ -1,27 +1,32 @@
-// Path rules, the region line and file writes, without the server around them.
+// Path rules and file writes, without the server around them.
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import * as workspace from "../src/workspace.ts";
-import { MESH, SCRIPT, WorkspaceError } from "../src/workspace.ts";
+import { FILES, SCRIPT, WorkspaceError } from "../src/workspace.ts";
 import { tempDir, writeFile } from "./helpers.ts";
 
 describe("resolve", () => {
   it("accepts paths inside the output directory", () => {
     const out = tempDir();
     expect(workspace.resolve(out, "a/b.rhai", [SCRIPT])).toBe(path.join(out, "a/b.rhai"));
-    expect(workspace.resolve(out, path.join(out, "c.STL"), [SCRIPT, MESH])).toBe(
-      path.join(out, "c.STL"),
-    );
+    expect(workspace.resolve(out, path.join(out, "c.STL"), FILES)).toBe(path.join(out, "c.STL"));
+    expect(workspace.resolve(out, "d.3mf", FILES)).toBe(path.join(out, "d.3mf"));
   });
 
   it.each([
     ["", "must not be empty"],
     ["../x.rhai", "inside the output directory"],
     [".", "inside the output directory"],
-    ["x.txt", "end in .rhai or .stl"],
+    ["x.txt", "end in .rhai, .step, .stp, .iges, .igs, .brep, .brp, .stl, .obj or .3mf"],
   ])("refuses '%s'", (relative, message) => {
-    expect(() => workspace.resolve(tempDir(), relative, [SCRIPT, MESH])).toThrow(message);
+    expect(() => workspace.resolve(tempDir(), relative, FILES)).toThrow(message);
+  });
+
+  it("names the one suffix a path must have", () => {
+    expect(() => workspace.resolve(tempDir(), "x.stl", [SCRIPT])).toThrow(
+      /^path must end in \.rhai$/,
+    );
   });
 
   it("follows symlinks, dangling ones included", () => {
@@ -48,12 +53,13 @@ describe("resolve", () => {
 });
 
 describe("listFiles", () => {
-  it("lists scripts and meshes newest first, skipping the rest", () => {
+  it("lists scripts and exports newest first, skipping the rest", () => {
     const out = tempDir();
     writeFile(path.join(out, "old.stl"), "a", 1000);
     writeFile(path.join(out, "parts/new.RHAI"), "bbb", 3000);
     writeFile(path.join(out, "b.stl"), "cc", 2000);
     writeFile(path.join(out, "a.rhai"), "cc", 2000);
+    writeFile(path.join(out, "part.STP"), "dddd", 1500);
     writeFile(path.join(out, "notes.txt"), "x", 4000);
     writeFile(path.join(out, ".cache/hidden.stl"), "x", 5000);
     fs.mkdirSync(path.join(out, "folder.stl"));
@@ -61,11 +67,14 @@ describe("listFiles", () => {
     const outside = path.join(tempDir(), "secret.rhai");
     fs.writeFileSync(outside, "secret");
     fs.symlinkSync(outside, path.join(out, "link.rhai"));
-    expect(workspace.listFiles(out).map((e) => [e.path, e.kind, e.bytes, e.modified])).toEqual([
-      ["parts/new.RHAI", "script", 3, 3000],
-      ["a.rhai", "script", 2, 2000],
-      ["b.stl", "mesh", 2, 2000],
-      ["old.stl", "mesh", 1, 1000],
+    expect(
+      workspace.listFiles(out).map((e) => [e.path, e.kind, e.format, e.bytes, e.modified]),
+    ).toEqual([
+      ["parts/new.RHAI", "script", "rhai", 3, 3000],
+      ["a.rhai", "script", "rhai", 2, 2000],
+      ["b.stl", "export", "stl", 2, 2000],
+      ["part.STP", "export", "step", 4, 1500],
+      ["old.stl", "export", "stl", 1, 1000],
     ]);
   });
 
@@ -102,14 +111,11 @@ describe("write and version", () => {
   });
 });
 
-describe("withRegion", () => {
-  const region = { center: [0, 0, 1] as [number, number, number], halfSize: 2 };
-  it("adds or replaces the region line, ending with one newline", () => {
-    expect(workspace.withRegion("draw(x);", region)).toBe(
-      "// region: center=[0, 0, 1] half_size=2\ndraw(x);\n",
-    );
-    expect(
-      workspace.withRegion("// region: center=[9, 9, 9] half_size=9\ndraw(x);\n\n", region),
-    ).toBe("// region: center=[0, 0, 1] half_size=2\ndraw(x);\n");
+describe("scriptText", () => {
+  it("ends a script with one newline, and leaves the rest alone", () => {
+    expect(workspace.scriptText("cube(1)")).toBe("cube(1)\n");
+    // An old region line is only a comment now; it stays.
+    const old = "// region: center=[0, 0, 0] half_size=9\ncube(1)\n\n";
+    expect(workspace.scriptText(old)).toBe("// region: center=[0, 0, 0] half_size=9\ncube(1)\n");
   });
 });

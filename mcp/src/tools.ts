@@ -1,13 +1,14 @@
-// The MCP tools: the scratchcad API, plus saving and reading scripts in the
-// local output directory.
+// The MCP tools: the scratchcad API, plus saving and reading scripts and
+// writing exports in the local output directory.
 import fs from "node:fs";
 import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { type BinaryResult, type Body, ScratchcadClient, ScratchcadError } from "./client.ts";
 import { GUIDE } from "./guide.ts";
+import { EXPORT_EXTENSIONS, FORMAT_INFO, FORMATS, formatOf } from "./shared/formats.ts";
 import { checkParams, parseParams } from "./shared/params.ts";
 import * as workspace from "./workspace.ts";
-import { MESH, SCRIPT, WorkspaceError } from "./workspace.ts";
+import { SCRIPT, WorkspaceError } from "./workspace.ts";
 
 export interface ToolOptions {
   client: ScratchcadClient;
@@ -24,42 +25,67 @@ export class ToolError extends Error {
 
 const script = z
   .string()
-  .describe("Rhai script that draws the shape. See the server instructions.");
-const evaluator = z
-  .enum(["jit", "vm"])
-  .optional()
-  .describe("Evaluator backend. Leave unset for the server default (jit).");
+  .describe("Rhai script that builds the shape. See the server instructions.");
 const vec3 = z.tuple([z.number(), z.number(), z.number()]);
-const center3 = vec3.describe("Model-space point at the middle of the view.");
 const halfSize = z
   .number()
   .gt(0)
-  .describe("The region covered is center ± half_size on each axis.");
+  .optional()
+  .describe(
+    "Half the width of the view along the image's longer side. Leave unset to fit the part.",
+  );
 const pixels = z.number().int().min(1).describe("Image size in pixels.");
+const meshFormats = FORMATS.filter((f) => FORMAT_INFO[f].mesh);
 
 const readOnly = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
 const writing = { readOnlyHint: false, destructiveHint: true };
 
-const looseObject = z.looseObject({});
+const shapeSummary = z
+  .looseObject({
+    type: z.string().describe("solid, compound, shell, face, wire, edge or vertex."),
+    solids: z.number().int(),
+    faces: z.number().int(),
+    edges: z.number().int(),
+    vertices: z.number().int(),
+    valid: z.boolean().describe("Whether OpenCASCADE's checker finds the shape valid."),
+    bounding_box: z.looseObject({ min: vec3, max: vec3, size: vec3 }),
+    volume: z.number(),
+    area: z.number(),
+    center: vec3.describe("Center of mass."),
+  })
+  .describe("What the script built.");
+const shapeWarnings = z
+  .array(z.string())
+  .describe("Problems with the shape that will cause trouble, such as having no solids.");
 
-const stlExport = z.object({
-  path: z.string().describe("Absolute path of the written STL file."),
+const validated = z.looseObject({
+  shape: shapeSummary,
+  output: z.array(z.string()).describe("What the script printed with print() and debug()."),
+  warnings: shapeWarnings,
+  script_ms: z.number(),
+  measure_ms: z.number(),
+});
+
+const exported = z.object({
+  path: z.string().describe("Absolute path of the written file."),
+  format: z.enum(FORMATS),
   bytes: z.number().int(),
-  triangles: z.number().int().nullable(),
+  triangles: z.number().int().nullable().describe("Triangles in a mesh format; null otherwise."),
+  tolerance: z
+    .number()
+    .nullable()
+    .describe("The mesh tolerance used, for mesh formats; null otherwise."),
   compute_ms: z.number().nullable(),
   warnings: z
     .array(z.string())
-    .describe(
-      "Observations that did not stop the export, such as the sides of the region the shape reaches.",
-    ),
+    .describe("Observations that did not stop the export, such as a mesh that isn't watertight."),
 });
 
 const savedScript = z.object({
   path: z.string().describe("Absolute path of the written .rhai file."),
   bytes: z.number().int(),
-  nodes: z.number().int().describe("Node count of the script's math graph."),
-  center: vec3,
-  half_size: z.number(),
+  shape: shapeSummary,
+  warnings: shapeWarnings,
   editor_url: z
     .string()
     .nullable()
@@ -85,9 +111,7 @@ const savedScript = z.object({
 
 const scriptFile = z.object({
   path: z.string().describe("Absolute path of the .rhai file."),
-  script: z.string().describe("The file's text, including its region line."),
-  center: vec3.nullable().describe("Center from the region line, if it has one."),
-  half_size: z.number().nullable().describe("half_size from the region line, if any."),
+  script: z.string().describe("The file's text."),
 });
 
 /** Leave unset options out of the request so the server applies its defaults. */
@@ -99,11 +123,21 @@ function structured<T extends Record<string, unknown>>(value: T): CallToolResult
   return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
 }
 
-/** The rendered PNG, followed by a text block for each warning. */
+/**
+ * The rendered PNG, then the view it shows (so a follow-up render can keep or
+ * adjust it), then a text block for each warning.
+ */
 function image(result: BinaryResult): CallToolResult {
+  const view = result.view && {
+    type: "text" as const,
+    text:
+      `View: center=${JSON.stringify(result.view.center)} half_size=${result.view.halfSize}. ` +
+      "Pass them back to keep this framing, or a smaller half_size to zoom in.",
+  };
   return {
     content: [
       { type: "image", data: result.data.toString("base64"), mimeType: "image/png" },
+      ...(view ? [view] : []),
       ...result.warnings.map((w) => ({ type: "text" as const, text: `Warning: ${w}` })),
     ],
   };
@@ -128,8 +162,8 @@ async function guard(run: () => Promise<CallToolResult>): Promise<CallToolResult
 }
 
 /** Where a tool may write `relative`, or a ToolError saying why it may not. */
-function writable(outputDir: string, relative: string, suffix: string, overwrite: boolean) {
-  const target = workspace.resolve(outputDir, relative, [suffix]);
+function writable(outputDir: string, relative: string, suffixes: string[], overwrite: boolean) {
+  const target = workspace.resolve(outputDir, relative, suffixes);
   if (fs.existsSync(target) && !overwrite) {
     throw new ToolError(`${target} already exists; pass overwrite=true to replace it`);
   }
@@ -143,75 +177,39 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
     "validate_script",
     {
       description:
-        "Check a script without rendering it.\n\nReturns the node count of the resulting math " +
-        "graph, anything the script printed and the compile time. Errors include the line and column.",
+        "Run a script and describe the shape it builds, without rendering it.\n\nReturns the " +
+        "shape's type, its solid, face, edge and vertex counts, whether it is valid, its " +
+        "bounding box, volume, area and center of mass, anything the script printed, and " +
+        "warnings. Errors include the line and column. Use it to check dimensions exactly.",
       inputSchema: z.strictObject({ script }),
-      outputSchema: looseObject,
+      outputSchema: validated,
       annotations: readOnly,
     },
     (args) => guard(async () => structured(await client.validate({ script: args.script }))),
   );
 
   server.registerTool(
-    "evaluate",
-    {
-      description:
-        "Sample the field exactly, to measure the shape rather than eyeball it.\n\nA negative " +
-        "value means the point is inside. gradient mode also returns the surface normal " +
-        "direction. interval mode returns conservative [lower, upper] bounds over each box: an " +
-        "upper bound below zero means the box is entirely solid, and a lower bound above zero " +
-        "means it is empty.",
-      inputSchema: z.strictObject({
-        script,
-        mode: z
-          .enum(["value", "gradient", "interval"])
-          .default("value")
-          .describe("value and gradient use points; interval uses intervals."),
-        points: z
-          .array(vec3)
-          .optional()
-          .describe("Points [x, y, z] to sample, for value and gradient modes."),
-        intervals: z
-          .array(
-            z.tuple([
-              z.tuple([z.number(), z.number()]),
-              z.tuple([z.number(), z.number()]),
-              z.tuple([z.number(), z.number()]),
-            ]),
-          )
-          .optional()
-          .describe("Boxes [[xmin, xmax], [ymin, ymax], [zmin, zmax]], for interval mode."),
-        evaluator,
-      }),
-      outputSchema: looseObject,
-      annotations: readOnly,
-    },
-    (args) => guard(async () => structured(await client.eval(dropUndefined(args)))),
-  );
-
-  server.registerTool(
     "render_2d",
     {
       description:
-        "Render the cross-section at z = 0 as a PNG.\n\nUse it to see inside a part: holes, " +
-        "wall thickness and internal features. To slice at another height, move the shape in " +
-        "the script.",
+        "Render the cross-section at z = 0 as a PNG, looking down the Z axis with +X right " +
+        "and +Y up.\n\nUse it to see inside a part: holes, wall thickness and internal " +
+        "features. A part resting on the XY plane shows the outline of its base. To slice " +
+        "elsewhere, translate the shape in the script. The view fits the part unless center " +
+        "and half_size are given.",
       inputSchema: z.strictObject({
         script,
         width: pixels.default(512),
         height: pixels.default(512),
         mode: z
-          .enum(["mono", "sdf", "debug"])
+          .enum(["mono", "outline"])
           .default("mono")
-          .describe(
-            "mono is white on black, sdf colours by distance, debug shows interval levels.",
-          ),
+          .describe("mono fills the section white on black; outline draws only its edges."),
         center: z
           .tuple([z.number(), z.number()])
-          .default([0, 0])
-          .describe("Model-space point at the image center."),
-        half_size: halfSize.default(1),
-        evaluator,
+          .optional()
+          .describe("Model-space [x, y] at the image center. Leave unset to fit the part."),
+        half_size: halfSize,
       }),
       annotations: readOnly,
     },
@@ -222,85 +220,102 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
     "render_3d",
     {
       description:
-        "Render a shaded 3D view of the shape as a PNG with a transparent background.\n\nWith " +
-        "no rotation the camera looks along -z with +y up. The default angle turns the part " +
-        "slightly so three faces show. Render several angles to check a part from all sides.",
+        "Render a shaded 3D view of the shape as a PNG with a transparent background, with " +
+        "its sharp edges drawn.\n\nThe angles compose like this: with all three at 0 the camera " +
+        "looks straight down the Z axis (+Y up on screen). pitch then tips it toward the " +
+        "horizon: 90 is a front view from -Y with +Z up. roll then turns the camera around " +
+        "the part's Z axis: 90 views it from +X. yaw turns about the Y axis and is rarely " +
+        "needed. The default looks from the front right, slightly above. Render several " +
+        "angles to check a part from all sides. The view fits the part unless center and " +
+        "half_size are given.",
       inputSchema: z.strictObject({
         script,
         width: pixels.default(512),
         height: pixels.default(512),
-        yaw: z.number().default(30).describe("Degrees about the Y axis."),
-        pitch: z.number().default(-20).describe("Degrees about the X axis."),
-        roll: z.number().default(0).describe("Degrees about the Z axis."),
-        center: center3.default([0, 0, 0]),
-        half_size: halfSize.default(1),
+        pitch: z
+          .number()
+          .default(65)
+          .describe("Degrees: 0 looks down from +Z, 90 is level, 180 looks up from below."),
+        roll: z
+          .number()
+          .default(30)
+          .describe("Degrees around the part's Z axis: 0 from the front (-Y), 90 from +X."),
+        yaw: z.number().default(0).describe("Degrees about the Y axis, applied last."),
+        center: vec3
+          .optional()
+          .describe("Model-space point at the middle of the view. Leave unset to fit the part."),
+        half_size: halfSize,
         mode: z
           .enum(["shaded", "normals", "heightmap"])
           .default("shaded")
-          .describe("Shading style."),
-        ssao: z.boolean().default(true).describe("Ambient occlusion (shaded mode only)."),
+          .describe(
+            "shaded is lit; normals colours each surface by its direction; heightmap is " +
+              "brighter where nearer.",
+          ),
+        edges: z
+          .boolean()
+          .default(true)
+          .describe("Draw the sharp edges as dark lines (shaded and normals modes)."),
         perspective: z.number().min(0).max(1).default(0).describe("0 is orthographic, up to 1."),
-        depth: z
-          .number()
-          .int()
-          .min(1)
-          .optional()
-          .describe("Voxels along the view axis. Defaults to max(width, height)."),
-        evaluator,
       }),
       annotations: readOnly,
     },
-    ({ yaw, pitch, roll, ssao, ...args }) =>
+    ({ yaw, pitch, roll, ...args }) =>
       guard(async () =>
-        image(
-          await client.raster3d(
-            dropUndefined({
-              ...args,
-              ssao: args.mode === "shaded" ? ssao : undefined,
-              rotation: { yaw, pitch, roll },
-            }),
-          ),
-        ),
+        image(await client.raster3d(dropUndefined({ ...args, rotation: { yaw, pitch, roll } }))),
       ),
   );
 
   server.registerTool(
-    "export_stl",
+    "export",
     {
       description:
-        "Mesh the shape and save it as a binary STL file.\n\nVertices are in model coordinates. " +
-        "Only the cube center ± half_size is meshed, so make it enclose the whole part.",
+        "Export the shape to a file in the output directory. The path's extension picks the " +
+        "format: " +
+        FORMATS.map((f) => `${FORMAT_INFO[f].extensions.join("/")} (${FORMAT_INFO[f].use})`).join(
+          ", ",
+        ) +
+        ".\n\nCoordinates are model units, read as millimetres by most programs. Mesh formats " +
+        "(.stl, .obj, .3mf) are watertight for solids.",
       inputSchema: z.strictObject({
         script,
         path: z
           .string()
           .describe(
-            "Where to write the .stl file, relative to the output directory " +
+            "Where to write the file, relative to the output directory " +
               "(SCRATCHCAD_MCP_OUTPUT_DIR). It cannot leave that directory.",
           ),
-        center: center3.default([0, 0, 0]),
-        half_size: halfSize.default(1),
-        depth: z
+        tolerance: z
           .number()
-          .int()
-          .min(1)
-          .default(6)
-          .describe("Octree depth; the mesh has 2^depth cells per axis."),
+          .gt(0)
+          .optional()
+          .describe(
+            "Mesh formats only: the largest distance between the mesh and the true surface, " +
+              "in model units. Defaults to 1/1000 of the bounding box's diagonal.",
+          ),
         overwrite: z.boolean().default(false).describe("Replace the file if it already exists."),
-        evaluator,
       }),
-      outputSchema: stlExport,
+      outputSchema: exported,
       annotations: writing,
     },
     ({ path, overwrite, ...args }) =>
       guard(async () => {
-        const target = writable(outputDir, path, MESH, overwrite);
-        const result = await client.exportStl(dropUndefined(args));
+        const target = writable(outputDir, path, EXPORT_EXTENSIONS, overwrite);
+        const format = formatOf(target)!;
+        if (args.tolerance !== undefined && !FORMAT_INFO[format].mesh) {
+          throw new ToolError(
+            `tolerance only applies to mesh formats (${meshFormats.join(", ")}); ` +
+              `${format} stores exact geometry`,
+          );
+        }
+        const result = await client.export(format, dropUndefined(args));
         workspace.write(target, result.data);
         return structured({
           path: target,
+          format,
           bytes: result.data.length,
           triangles: result.triangles,
+          tolerance: result.tolerance,
           compute_ms: result.computeMs,
           warnings: result.warnings,
         });
@@ -311,10 +326,10 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
     "save_script",
     {
       description:
-        "Check the script and save it as a .rhai file the user can open in the editor.\n\nThis " +
-        "is how a finished part is delivered. The first line of the file records the region " +
-        "(center and half_size) the editor meshes. The result lists the sliders the user will " +
-        "see and notes on any that are unclear; fix those and save again (overwrite=true).",
+        "Check the script and save it as a .rhai file the user can open in the editor.\n\n" +
+        "This is how a finished part is delivered. The result describes the shape, lists the " +
+        "sliders the user will see and notes on any that are unclear; fix those and save " +
+        "again (overwrite=true).",
       inputSchema: z.strictObject({
         script,
         path: z
@@ -323,20 +338,6 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
             "Where to write the .rhai file, relative to the output directory " +
               "(SCRATCHCAD_MCP_OUTPUT_DIR). It cannot leave that directory.",
           ),
-        center: vec3
-          .optional()
-          .describe(
-            "Center of the region that encloses the part. Leave unset to keep the script's " +
-              "existing region line, or (0, 0, 0).",
-          ),
-        half_size: z
-          .number()
-          .gt(0)
-          .optional()
-          .describe(
-            "The region is center ± half_size on each axis. Leave unset to keep the script's " +
-              "existing region line, or 1.",
-          ),
         overwrite: z.boolean().default(false).describe("Replace the file if it already exists."),
       }),
       outputSchema: savedScript,
@@ -344,23 +345,17 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
     },
     (args) =>
       guard(async () => {
-        const target = writable(outputDir, args.path, SCRIPT, args.overwrite);
-        const existing = workspace.parseRegion(args.script);
-        const region = {
-          center: args.center ?? existing?.center ?? [0, 0, 0],
-          halfSize: args.half_size ?? existing?.halfSize ?? 1,
-        } satisfies workspace.Region;
+        const target = writable(outputDir, args.path, [SCRIPT], args.overwrite);
         const checked = await client.validate({ script: args.script });
-        const text = workspace.withRegion(args.script, region);
+        const text = workspace.scriptText(args.script);
         const params = parseParams(text);
         workspace.write(target, text);
         const relative = workspace.entry(outputDir, target).path;
         return structured({
           path: target,
           bytes: Buffer.byteLength(text),
-          nodes: checked.nodes as number,
-          center: region.center,
-          half_size: region.halfSize,
+          shape: checked.shape as z.infer<typeof shapeSummary>,
+          warnings: checked.warnings as string[],
           editor_url: editorUrl && `${editorUrl}?open=${encodeURIComponent(relative)}`,
           parameters: params.map(({ name, label, section, value, min, max }) => ({
             name,
@@ -395,13 +390,7 @@ export function createMcpServer({ client, outputDir, editorUrl, version }: ToolO
         } catch {
           throw new ToolError(`${args.path} is not UTF-8 text`);
         }
-        const region = workspace.parseRegion(text);
-        return structured({
-          path: target,
-          script: text,
-          center: region?.center ?? null,
-          half_size: region?.halfSize ?? null,
-        });
+        return structured({ path: target, script: text });
       }),
   );
 

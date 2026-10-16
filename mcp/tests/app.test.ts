@@ -92,22 +92,37 @@ function raw(
 }
 
 describe("file API", () => {
-  it("lists scripts and meshes newest first", async () => {
+  it("lists scripts and exports newest first", async () => {
     const { base, out } = await serve();
     writeFile(path.join(out, "old.stl"), "a", 1000);
     writeFile(path.join(out, "parts/new.rhai"), "bbb", 3000);
+    writeFile(path.join(out, "part.step"), "ISO", 2000);
     writeFile(path.join(out, "notes.txt"), "x", 4000);
     const files = (await raw(base, "GET", "/api/files")).json();
-    expect(files.map((f: { path: string; kind: string }) => [f.path, f.kind])).toEqual([
-      ["parts/new.rhai", "script"],
-      ["old.stl", "mesh"],
+    expect(
+      files.map((f: { path: string; kind: string; format: string }) => [f.path, f.kind, f.format]),
+    ).toEqual([
+      ["parts/new.rhai", "script", "rhai"],
+      ["part.step", "export", "step"],
+      ["old.stl", "export", "stl"],
     ]);
     expect(files.every((f: { version: string }) => f.version)).toBe(true);
   });
 
-  it("serves scripts as text and meshes as STL, with their version", async () => {
+  it("serves scripts as text and exports with their format's type, with their version", async () => {
     const { base, out } = await serve();
     writeFile(path.join(out, "parts/my bolt.stl"), "solid-bytes", 1000);
+    for (const [name, type] of [
+      ["a.step", "model/step"],
+      ["a.igs", "model/iges"],
+      ["a.brep", "application/octet-stream"],
+      ["a.obj", "model/obj"],
+      ["a.3mf", "model/3mf"],
+    ]) {
+      writeFile(path.join(out, name!), "data", 1000);
+      const reply = await raw(base, "GET", `/api/files/${name}`);
+      expect([reply.status, reply.headers["content-type"]]).toEqual([200, type]);
+    }
     writeFile(path.join(out, "bolt.rhai"), SCRIPT, 1000);
     const mesh = await raw(base, "GET", "/api/files/parts/my%20bolt.stl");
     expect([
@@ -183,8 +198,10 @@ describe("file API", () => {
     });
     expect(fs.readFileSync(path.join(out, "new/part.rhai"), "utf8")).toBe(SCRIPT);
     const mesh = await raw(base, "PUT", "/api/files/part.stl", {}, Buffer.from("solid"));
-    expect(mesh.json().kind).toBe("mesh");
-    expect(fs.readdirSync(out).sort()).toEqual(["new", "part.stl"]);
+    expect(mesh.json()).toMatchObject({ kind: "export", format: "stl" });
+    const step = await raw(base, "PUT", "/api/files/part.step", {}, Buffer.from("ISO-10303-21;"));
+    expect(step.json()).toMatchObject({ kind: "export", format: "step" });
+    expect(fs.readdirSync(out).sort()).toEqual(["new", "part.step", "part.stl"]);
   });
 
   it("checks the expected version", async () => {
@@ -257,8 +274,10 @@ describe("scratchcad proxy", () => {
     fake.handler = () =>
       response(200, Buffer.from("solid"), {
         "content-type": "model/stl",
+        "content-disposition": 'attachment; filename="shape.stl"',
         "x-triangle-count": "12",
-        "x-warning": ["a, b", "c"],
+        "x-mesh-tolerance": "0.05",
+        "x-warning": ["a, b", "c ü"],
         "x-secret": "not forwarded",
       });
     const reply = await raw(
@@ -266,16 +285,30 @@ describe("scratchcad proxy", () => {
       "POST",
       "/api/scratchcad/v1/export/stl",
       { "content-type": "application/json" },
-      JSON.stringify({ script: SCRIPT, depth: 5 }),
+      JSON.stringify({ script: SCRIPT, tolerance: 0.05 }),
     );
     expect(reply.status).toBe(200);
     expect(reply.text).toBe("solid");
     expect(reply.headers["x-triangle-count"]).toBe("12");
-    expect(reply.headers["x-warning"]).toBe("a, b, c"); // node joins repeats when reading
+    expect(reply.headers["x-mesh-tolerance"]).toBe("0.05");
+    expect(reply.headers["content-disposition"]).toBe('attachment; filename="shape.stl"');
+    // Warnings arrive whole, as one JSON array, escaped to ASCII
+    expect(reply.headers["x-warnings"]).toBe('["a, b","c \\u00fc"]');
+    expect(JSON.parse(reply.headers["x-warnings"] as string)).toEqual(["a, b", "c ü"]);
+    expect(reply.headers["x-warning"]).toBeUndefined();
     expect(reply.headers["x-secret"]).toBeUndefined();
     expect(fake.last.url.pathname).toBe("/v1/export/stl");
-    expect(fake.last.body).toEqual({ script: SCRIPT, depth: 5 });
+    expect(fake.last.body).toEqual({ script: SCRIPT, tolerance: 0.05 });
   });
+
+  it.each(["step", "stp", "iges", "igs", "brep", "brp", "stl", "obj", "3mf"])(
+    "forwards exports as %s",
+    async (format) => {
+      const { base, fake } = await serve();
+      await raw(base, "POST", `/api/scratchcad/v1/export/${format}`, {}, "");
+      expect(fake.requests.map((r) => r.url.pathname)).toEqual([`/v1/export/${format}`]);
+    },
+  );
 
   it("passes scratchcad's errors through", async () => {
     const { base, fake } = await serve();
@@ -286,19 +319,22 @@ describe("scratchcad proxy", () => {
     expect(fake.last.body).toEqual({});
   });
 
-  it("only forwards the API's endpoints", async () => {
-    const { base, fake } = await serve();
-    const reply = await raw(base, "POST", "/api/scratchcad/admin/shutdown", {}, "");
-    expect([reply.status, reply.json().error.code]).toEqual([404, "not_found"]);
-    expect(fake.requests).toEqual([]);
-  });
+  it.each(["admin/shutdown", "v1/eval", "v1/export/dxf", "v1/export/stl%2F..%2Fx"])(
+    "only forwards the API's endpoints, not %s",
+    async (endpoint) => {
+      const { base, fake } = await serve();
+      const reply = await raw(base, "POST", `/api/scratchcad/${endpoint}`, {}, "");
+      expect([reply.status, reply.json().error.code]).toEqual([404, "not_found"]);
+      expect(fake.requests).toEqual([]);
+    },
+  );
 
   it("answers 502 when scratchcad is unreachable", async () => {
     const { base, fake } = await serve();
     fake.handler = () => {
       throw new Error("connect ECONNREFUSED");
     };
-    const reply = await raw(base, "POST", "/api/scratchcad/v1/eval", {}, "");
+    const reply = await raw(base, "POST", "/api/scratchcad/v1/raster/3d", {}, "");
     expect(reply.status).toBe(502);
     expect(reply.json().error).toMatchObject({ code: "unreachable" });
     expect(reply.json().error.message).toContain("could not reach scratchcad");
@@ -309,7 +345,7 @@ describe("scratchcad proxy", () => {
     const bad = await raw(
       base,
       "POST",
-      "/api/scratchcad/v1/eval",
+      "/api/scratchcad/v1/scripts/validate",
       { "content-type": "application/json" },
       "{",
     );
@@ -319,7 +355,7 @@ describe("scratchcad proxy", () => {
     const big = await raw(
       base,
       "POST",
-      "/api/scratchcad/v1/eval",
+      "/api/scratchcad/v1/scripts/validate",
       { "content-type": "application/json" },
       huge,
     );

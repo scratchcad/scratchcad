@@ -1,10 +1,10 @@
 //! Runtime configuration, sourced from CLI flags or `SCRATCHCAD_*` env vars.
 
-use std::{net::SocketAddr, num::NonZeroUsize, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
 use clap::Parser;
 
-/// HTTP API for Fidget: Rhai scripting, evaluation, rasterization and STL export
+/// HTTP API for OpenCASCADE B-rep modelling: Rhai scripting, measuring, rendering and export
 #[derive(Parser, Debug, Clone)]
 #[command(version, about)]
 pub struct Config {
@@ -20,11 +20,6 @@ pub struct Config {
     #[arg(long, env = "SCRATCHCAD_LOG_FORMAT", value_enum, default_value_t = LogFormat::Text)]
     pub log_format: LogFormat,
 
-    /// Worker threads used by Fidget for rendering and meshing
-    /// (defaults to the number of CPUs)
-    #[arg(long, env = "SCRATCHCAD_RENDER_THREADS")]
-    pub render_threads: Option<NonZeroUsize>,
-
     /// Maximum number of jobs executing at once; further requests queue
     #[arg(long, env = "SCRATCHCAD_MAX_CONCURRENT_JOBS", default_value_t = 4)]
     pub max_concurrent_jobs: usize,
@@ -33,9 +28,18 @@ pub struct Config {
     #[arg(long, env = "SCRATCHCAD_QUEUE_TIMEOUT_MS", default_value_t = 5_000)]
     pub queue_timeout_ms: u64,
 
-    /// Wall-clock budget for a single job (script + evaluation / render)
+    /// Wall-clock budget for a single job (script + measuring, rendering or
+    /// export); its worker process is killed when it runs out
     #[arg(long, env = "SCRATCHCAD_JOB_TIMEOUT_MS", default_value_t = 30_000)]
     pub job_timeout_ms: u64,
+
+    /// Heap memory (`RLIMIT_DATA`) each job's worker process may use, in MiB
+    #[arg(long, env = "SCRATCHCAD_WORKER_MEMORY_MIB", default_value_t = 2048)]
+    pub worker_memory_mib: u64,
+
+    /// CPU time each job's worker process may use, in seconds
+    #[arg(long, env = "SCRATCHCAD_WORKER_CPU_SECONDS", default_value_t = 60)]
+    pub worker_cpu_seconds: u64,
 
     /// Maximum request body size in bytes
     #[arg(long, env = "SCRATCHCAD_MAX_BODY_BYTES", default_value_t = 4 * 1024 * 1024)]
@@ -53,33 +57,34 @@ pub struct Config {
     )]
     pub max_script_operations: u64,
 
-    /// Maximum number of unique nodes in the math graph a script produces
-    #[arg(long, env = "SCRATCHCAD_MAX_NODES", default_value_t = 100_000)]
-    pub max_nodes: usize,
-
-    /// Maximum number of points (or intervals) per evaluation request
-    #[arg(long, env = "SCRATCHCAD_MAX_EVAL_POINTS", default_value_t = 100_000)]
-    pub max_eval_points: usize,
-
     /// Maximum width / height of a 2D raster image
     #[arg(long, env = "SCRATCHCAD_MAX_IMAGE_SIZE_2D", default_value_t = 4096)]
     pub max_image_size_2d: u32,
 
-    /// Maximum width / height / depth of a 3D raster image
+    /// Maximum width / height of a 3D raster image
     #[arg(long, env = "SCRATCHCAD_MAX_IMAGE_SIZE_3D", default_value_t = 2048)]
     pub max_image_size_3d: u32,
 
-    /// Maximum octree depth for meshing
-    #[arg(long, env = "SCRATCHCAD_MAX_MESH_DEPTH", default_value_t = 10)]
-    pub max_mesh_depth: u8,
-
-    /// Maximum number of triangles in an exported mesh
+    /// Maximum number of triangles in a mesh, for an export or a render
     #[arg(
         long,
         env = "SCRATCHCAD_MAX_MESH_TRIANGLES",
         default_value_t = 4_000_000
     )]
     pub max_mesh_triangles: usize,
+
+    /// Maximum number of faces in a shape; larger shapes are rejected before
+    /// they are measured, meshed or exported
+    #[arg(long, env = "SCRATCHCAD_MAX_FACES", default_value_t = 100_000)]
+    pub max_faces: usize,
+
+    /// Maximum size of an exported file in bytes
+    #[arg(
+        long,
+        env = "SCRATCHCAD_MAX_EXPORT_BYTES",
+        default_value_t = 128 * 1024 * 1024
+    )]
+    pub max_export_bytes: usize,
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,12 +117,13 @@ impl Config {
             ("max_script_bytes", self.max_script_bytes as u64),
             // Rhai treats 0 as "unlimited"
             ("max_script_operations", self.max_script_operations),
-            ("max_nodes", self.max_nodes as u64),
-            ("max_eval_points", self.max_eval_points as u64),
             ("max_image_size_2d", self.max_image_size_2d.into()),
             ("max_image_size_3d", self.max_image_size_3d.into()),
-            ("max_mesh_depth", self.max_mesh_depth.into()),
             ("max_mesh_triangles", self.max_mesh_triangles as u64),
+            ("max_faces", self.max_faces as u64),
+            ("max_export_bytes", self.max_export_bytes as u64),
+            ("worker_memory_mib", self.worker_memory_mib),
+            ("worker_cpu_seconds", self.worker_cpu_seconds),
         ];
         if let Some((name, _)) = nonzero.iter().find(|(_, v)| *v == 0) {
             return Err(format!("{name} must be at least 1"));
@@ -142,8 +148,10 @@ mod tests {
             Config::parse_from(std::iter::once("scratchcad").chain(args.iter().copied()))
         };
         assert!(parse(&[]).validate().is_ok());
-        assert!(parse(&["--max-nodes", "0"]).validate().is_err());
+        assert!(parse(&["--max-mesh-triangles", "0"]).validate().is_err());
         assert!(parse(&["--max-script-operations", "0"]).validate().is_err());
+        assert!(parse(&["--max-faces", "0"]).validate().is_err());
+        assert!(parse(&["--worker-memory-mib", "0"]).validate().is_err());
         assert!(parse(&["--api-token", "short"]).validate().is_err());
         assert!(
             parse(&["--max-body-bytes", "10", "--max-script-bytes", "20"])

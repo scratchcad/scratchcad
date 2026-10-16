@@ -1,23 +1,22 @@
 //! Sandboxed Rhai execution.
 //!
-//! Scripts use Fidget's Rhai bindings and produce a shape either by calling
-//! `draw(shape)` exactly once or by evaluating to a shape as their final
-//! expression.  The resulting math graph is returned as a Fidget
-//! [`Context`] + root [`Node`]; nothing is retained between requests.
+//! Scripts use [scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs)'s
+//! bindings to OpenCASCADE and produce a shape either by calling `draw(shape)`
+//! exactly once or by evaluating to a shape as their final expression.  The
+//! result is a B-rep [`Shape`]; nothing is retained between requests.
+//!
+//! Shapes and the engine are neither `Send` nor `Sync`, so the engine is built
+//! per call, inside the worker process that runs the job (see `worker`).
 
-use std::{
-    sync::{Arc, Mutex},
-    time::Instant,
+use std::{cell::RefCell, rc::Rc, time::Instant};
+
+use scratchcad_occt_rhai::{
+    ErrorKind, Selection, Shape, Sketch, error_kind,
+    rhai::{self, Dynamic, EvalAltResult},
+    to_shape,
 };
 
-use fidget::{
-    context::{Context, Node, Tree},
-    eval::Function,
-    render::CancelToken,
-    rhai::FromDynamic,
-    var::Var,
-};
-use rhai::{Dynamic, EvalAltResult, NativeCallContext};
+use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
 
@@ -26,42 +25,33 @@ const MAX_OUTPUT_LINES: usize = 100;
 /// Maximum length of a single captured output line
 const MAX_OUTPUT_LINE_LEN: usize = 1024;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ScriptLimits {
     pub max_operations: u64,
-    pub max_nodes: usize,
     pub max_string_size: usize,
 }
 
-/// A script that has been executed and reduced to a math graph
+/// A script that has been executed
 pub struct Compiled {
-    pub ctx: Context,
-    pub root: Node,
-    /// Number of unique nodes in the math graph
-    pub nodes: usize,
+    pub shape: Shape,
     /// Captured `print` / `debug` output
     pub output: Vec<String>,
     /// Time spent executing the script, in milliseconds
-    pub compile_ms: f64,
+    pub script_ms: f64,
 }
 
-/// Builds a Rhai engine with Fidget bindings and sandbox limits applied
-fn engine(
-    limits: &ScriptLimits,
-    cancel: CancelToken,
-    output: Arc<Mutex<Vec<String>>>,
-) -> rhai::Engine {
-    let mut engine = fidget::rhai::engine();
+type Output = Rc<RefCell<Vec<String>>>;
 
-    // Resource limits.  `fidget::rhai::engine` installs its own `on_progress`
-    // step limit; we replace it with a configurable operation cap plus a
-    // cancellation check so that timeouts interrupt long-running scripts.
+/// Builds a Rhai engine with the OpenCASCADE bindings and sandbox limits applied
+fn engine(limits: &ScriptLimits, output: Output) -> rhai::Engine {
+    // Registers every modelling function, with no filesystem access: `import`
+    // resolves nothing, and error tags are read-only.
+    let mut engine = scratchcad_occt_rhai::engine();
+
+    // Resource limits.  The operation cap counts Rhai operations, not the
+    // work an OpenCASCADE call does; long calls are stopped by killing the
+    // worker process when the job's time is up (see `jobs`).
     engine.set_max_operations(limits.max_operations);
-    engine.on_progress(move |_| {
-        cancel
-            .is_cancelled()
-            .then(|| Dynamic::from("script cancelled"))
-    });
     engine.set_max_call_levels(64);
     engine.set_max_expr_depths(64, 32);
     engine.set_max_string_size(limits.max_string_size);
@@ -70,9 +60,8 @@ fn engine(
     engine.set_max_variables(10_000);
     engine.set_max_functions(1_000);
 
-    // No filesystem access through `import`, and no dynamic `eval`.
+    // No modules at all, and no dynamic `eval`.
     engine.set_max_modules(0);
-    engine.set_module_resolver(rhai::module_resolvers::DummyModuleResolver::new());
     engine.disable_symbol("eval");
 
     // Capture output instead of writing to the server's stdout.
@@ -84,8 +73,8 @@ fn engine(
     engine
 }
 
-fn push_line(out: &Mutex<Vec<String>>, mut s: String) {
-    let mut out = out.lock().unwrap_or_else(|e| e.into_inner());
+fn push_line(out: &RefCell<Vec<String>>, mut s: String) {
+    let mut out = out.borrow_mut();
     if out.len() < MAX_OUTPUT_LINES {
         if s.len() > MAX_OUTPUT_LINE_LEN {
             let mut end = MAX_OUTPUT_LINE_LEN;
@@ -99,27 +88,36 @@ fn push_line(out: &Mutex<Vec<String>>, mut s: String) {
     }
 }
 
-/// Executes a script and reduces it to a math graph
-pub fn compile(
-    src: &str,
-    limits: &ScriptLimits,
-    cancel: &CancelToken,
-) -> Result<Compiled, ApiError> {
-    let start = Instant::now();
-    let output = Arc::new(Mutex::new(vec![]));
-    let mut engine = engine(limits, cancel.clone(), output.clone());
+/// Whether `to_shape` can turn the value into a shape
+fn is_shaped(value: &Dynamic) -> bool {
+    value.is::<Shape>() || value.is::<Selection>() || value.is::<Sketch>() || value.is_array()
+}
 
-    let drawn: Arc<Mutex<Option<Tree>>> = Arc::default();
-    let drawn_ = drawn.clone();
+/// Executes a script and returns the shape it produced
+pub fn compile(src: &str, limits: &ScriptLimits) -> Result<Compiled, ApiError> {
+    let start = Instant::now();
+    let output = Output::default();
+    let mut engine = engine(limits, output.clone());
+
+    let drawn: Rc<RefCell<Option<Shape>>> = Rc::default();
+    let slot = drawn.clone();
     engine.register_fn(
         "draw",
-        move |ctx: NativeCallContext, d: Dynamic| -> Result<(), Box<EvalAltResult>> {
-            let t = Tree::from_dynamic(&ctx, d, None)?;
-            let mut slot = drawn_.lock().unwrap_or_else(|e| e.into_inner());
+        move |value: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            if !is_shaped(&value) {
+                return Err(format!(
+                    "draw() needs a shape (or a selection, sketch or array of shapes), \
+                     not a value of type `{}`",
+                    value.type_name()
+                )
+                .into());
+            }
+            let shape = to_shape(value)?;
+            let mut slot = slot.borrow_mut();
             if slot.is_some() {
                 return Err("draw() may only be called once".into());
             }
-            *slot = Some(t);
+            *slot = Some(shape);
             Ok(())
         },
     );
@@ -129,72 +127,42 @@ pub fn compile(
         .map_err(|e| ApiError::Script(e.to_string()))?;
     let result = engine
         .eval_ast::<Dynamic>(&ast)
-        .map_err(|e| map_eval_error(*e, limits, cancel))?;
+        .map_err(|e| map_eval_error(*e, limits))?;
 
-    let tree = match drawn.lock().unwrap_or_else(|e| e.into_inner()).take() {
-        Some(t) => t,
+    let drawn = drawn.borrow_mut().take();
+    let shape = match drawn {
+        Some(shape) => shape,
+        None if is_shaped(&result) => to_shape(result).map_err(|e| map_eval_error(*e, limits))?,
         None => {
-            let got = result.type_name();
-            result.try_cast::<Tree>().ok_or_else(|| {
-                ApiError::Script(format!(
-                    "script must call draw(shape) or evaluate to a shape, \
-                     but it evaluated to a value of type `{got}`"
-                ))
-            })?
+            return Err(ApiError::Script(format!(
+                "script must call draw(shape) or evaluate to a shape, \
+                 but it evaluated to a value of type `{}`",
+                result.type_name()
+            )));
         }
     };
-    // Release the engine (and its closures) before the potentially large
-    // import, so that the only remaining reference to the tree is ours.
-    drop(engine);
-
-    let mut ctx = Context::new();
-    let root = ctx.import(&tree);
-    drop(tree);
-
-    let nodes = ctx.len();
-    if nodes > limits.max_nodes {
-        return Err(ApiError::LimitExceeded(format!(
-            "shape has {nodes} nodes; the limit is {}",
-            limits.max_nodes
+    if shape.vertices().is_empty() {
+        return Err(ApiError::Unprocessable(format!(
+            "the script produced an empty {} with no faces, edges or vertices; \
+             a boolean may have removed everything",
+            shape.shape_type()
         )));
     }
-    check_vars(&ctx, root)?;
 
-    let output = std::mem::take(&mut *output.lock().unwrap_or_else(|e| e.into_inner()));
+    let output = std::mem::take(&mut *output.borrow_mut());
     Ok(Compiled {
-        ctx,
-        root,
-        nodes,
+        shape,
         output,
-        compile_ms: start.elapsed().as_secs_f64() * 1e3,
+        script_ms: start.elapsed().as_secs_f64() * 1e3,
     })
 }
 
-/// Rejects shapes that depend on free variables other than `x`, `y`, `z`,
-/// which the rendering endpoints have no way to bind.
-fn check_vars(ctx: &Context, root: Node) -> Result<(), ApiError> {
-    // Only the graph the script produced can make this fail, so the error
-    // belongs to the caller rather than the server.
-    let shape = fidget::vm::VmShape::new(ctx, root)
-        .map_err(|e| ApiError::Unprocessable(format!("could not build the shape: {e}")))?;
-    let free = shape
-        .inner()
-        .vars()
-        .iter()
-        .filter(|(v, _)| !matches!(v, Var::X | Var::Y | Var::Z))
-        .count();
-    if free > 0 {
-        return Err(ApiError::Unprocessable(format!(
-            "shape uses {free} free variable(s) other than x, y and z; \
-             only x, y and z can be bound when it is evaluated"
-        )));
+fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits) -> ApiError {
+    // Scripts cannot touch files, but the kind is mapped like an export's.
+    if error_kind(&e) == Some(ErrorKind::Io) {
+        return ApiError::ExportFailed(e.to_string());
     }
-    Ok(())
-}
-
-fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits, cancel: &CancelToken) -> ApiError {
     match e {
-        EvalAltResult::ErrorTerminated(..) if cancel.is_cancelled() => ApiError::cancelled(),
         EvalAltResult::ErrorTooManyOperations(pos) => {
             let at = if pos.is_none() {
                 String::new()
@@ -219,57 +187,84 @@ fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits, cancel: &CancelToken)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scratchcad_occt_rhai::{Error, ShapeType, rhai::Position};
 
     fn limits() -> ScriptLimits {
         ScriptLimits {
             max_operations: 100_000,
-            max_nodes: 10_000,
             max_string_size: 4096,
+        }
+    }
+
+    fn run(src: &str) -> Result<Compiled, ApiError> {
+        compile(src, &limits())
+    }
+
+    fn script_error(src: &str) -> String {
+        match run(src) {
+            Err(ApiError::Script(m)) => m,
+            Err(other) => panic!("expected a script error for {src}, got {other:?}"),
+            Ok(_) => panic!("expected a script error for {src}"),
         }
     }
 
     #[test]
     fn draw_and_expression_forms() {
-        let c = CancelToken::new();
-        let a = compile("draw(sphere(#{ radius: 1.0 }))", &limits(), &c).unwrap();
-        let b = compile("sphere(#{ radius: 1.0 })", &limits(), &c).unwrap();
-        assert_eq!(a.nodes, b.nodes);
-        assert!(a.nodes > 3);
+        let a = run("draw(box(1, 2, 3))").unwrap();
+        let b = run("box(1, 2, 3)").unwrap();
+        assert_eq!(a.shape.volume().unwrap(), b.shape.volume().unwrap());
+        assert_eq!(a.shape.shape_type(), ShapeType::Solid);
+        // draw() wins over the final expression
+        let c = run("draw(cube(2)); sphere(1)").unwrap();
+        assert!((c.shape.volume().unwrap() - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn selections_sketches_and_arrays_become_shapes() {
+        let faces = run("box(1, 1, 1).faces(\"|Z\")").unwrap();
+        assert_eq!(faces.shape.shape_type(), ShapeType::Compound);
+        // The top and bottom: their normals are parallel to Z
+        assert_eq!(faces.shape.faces().len(), 2);
+        let wire = run("sketch().move_to(0, 0).line_to(1, 0).line_to(0, 1)").unwrap();
+        assert_eq!(wire.shape.shape_type(), ShapeType::Wire);
+        let both = run("[cube(1), sphere([5, 0, 0], 1)]").unwrap();
+        assert_eq!(both.shape.solids().len(), 2);
+        let drawn = run("draw([cube(1)])").unwrap();
+        assert_eq!(drawn.shape.solids().len(), 1);
     }
 
     #[test]
     fn rejects_non_shapes_and_double_draw() {
-        let c = CancelToken::new();
-        assert!(matches!(
-            compile("1 + 2", &limits(), &c),
-            Err(ApiError::Script(_))
-        ));
-        assert!(matches!(
-            compile("draw(x); draw(y)", &limits(), &c),
-            Err(ApiError::Script(_))
-        ));
+        assert!(script_error("1 + 2").ends_with("evaluated to a value of type `i64`"));
+        assert!(script_error("let s = cube(1);").ends_with("evaluated to a value of type `()`"));
+        assert!(script_error("draw(cube(1)); draw(cube(2))").contains("only be called once"));
+        assert!(script_error("draw(42)").contains("not a value of type `i64`"));
+        assert!(script_error("[1, 2]").contains("expected shapes"));
     }
 
     #[test]
-    fn non_shape_result_names_what_the_script_produced() {
-        let c = CancelToken::new();
-        let msg = |src| match compile(src, &limits(), &c) {
-            Err(ApiError::Script(m)) => m,
-            _ => panic!("expected a script error for {src}"),
+    fn modelling_errors_are_script_errors_with_their_message() {
+        let m = script_error("sphere(-1)");
+        assert!(m.contains("invalid argument"), "{m}");
+        let m = script_error("cube(1).edges(\"bogus[\")");
+        assert!(m.contains("selector"), "{m}");
+    }
+
+    #[test]
+    fn empty_shapes_are_rejected() {
+        let Err(ApiError::Unprocessable(m)) = run("cube(1) - box_centered(10, 10, 10)") else {
+            panic!("expected an empty shape error")
         };
-        assert!(msg("1 + 2").ends_with("evaluated to a value of type `i64`"));
-        assert!(msg("let s = x;").ends_with("evaluated to a value of type `()`"));
+        assert!(m.contains("empty compound"), "{m}");
     }
 
     #[test]
     fn operation_budget_error_gives_limit_and_position() {
-        let c = CancelToken::new();
         let l = ScriptLimits {
             max_operations: 100,
             ..limits()
         };
-        let Err(ApiError::LimitExceeded(m)) = compile("let t = 0;\nloop { t += 1; }", &l, &c)
-        else {
+        let Err(ApiError::LimitExceeded(m)) = compile("let t = 0;\nloop { t += 1; }", &l) else {
             panic!("expected a limit error")
         };
         assert!(m.contains("budget of 100 operations at line 2"), "{m}");
@@ -277,62 +272,70 @@ mod tests {
 
     #[test]
     fn sandbox_limits() {
-        let c = CancelToken::new();
+        assert!(matches!(run("loop {}"), Err(ApiError::LimitExceeded(_))));
         assert!(matches!(
-            compile("loop {}", &limits(), &c),
-            Err(ApiError::LimitExceeded(_))
-        ));
-        assert!(matches!(
-            compile("import \"/etc/passwd\" as p; x", &limits(), &c),
+            run("import \"/etc/passwd\" as p; cube(1)"),
             Err(ApiError::Script(_))
         ));
+        assert!(matches!(run("eval(\"cube(1)\")"), Err(ApiError::Script(_))));
         assert!(matches!(
-            compile("eval(\"x\")", &limits(), &c),
-            Err(ApiError::Script(_))
-        ));
-        let big = "let t = x; for i in 0..20000 { t = t + i; } t";
-        assert!(matches!(
-            compile(big, &limits(), &c),
+            run("fn f(n) { f(n + 1) } f(0)"),
             Err(ApiError::LimitExceeded(_))
         ));
+        // Error tags are read-only, so a script cannot forge an error kind.
+        let m = script_error("let e = \"x\"; e.tag = 9; throw e;");
+        assert!(m.contains("read-only"), "{m}");
     }
 
     #[test]
-    fn cancellation_interrupts_script() {
-        let c = CancelToken::new();
-        c.cancel();
-        let l = ScriptLimits {
-            max_operations: 0, // unlimited
-            ..limits()
-        };
+    fn error_kinds_map_to_api_errors() {
+        let e = |error: Error| *Box::<EvalAltResult>::from(error);
         assert!(matches!(
-            compile("loop {}", &l, &c),
-            Err(ApiError::Timeout(_))
+            map_eval_error(e(Error::Io("disk".into())), &limits()),
+            ApiError::ExportFailed(m) if m.contains("disk")
+        ));
+        assert!(matches!(
+            map_eval_error(e(Error::OperationFailed("fillet")), &limits()),
+            ApiError::Script(m) if m.contains("fillet failed")
+        ));
+        let terminated = EvalAltResult::ErrorTerminated(Dynamic::UNIT, Position::NONE);
+        assert!(matches!(
+            map_eval_error(terminated, &limits()),
+            ApiError::Script(_)
+        ));
+        let large = EvalAltResult::ErrorDataTooLarge("array".into(), Position::NONE);
+        assert!(matches!(
+            map_eval_error(large, &limits()),
+            ApiError::LimitExceeded(m) if m.contains("size limit")
+        ));
+        let ops = EvalAltResult::ErrorTooManyOperations(Position::NONE);
+        assert!(matches!(
+            map_eval_error(ops, &limits()),
+            ApiError::LimitExceeded(m) if m.ends_with("operations")
         ));
     }
 
     #[test]
     fn captures_print() {
-        let c = CancelToken::new();
-        let out = compile("print(\"hi\"); x", &limits(), &c).unwrap();
-        assert_eq!(out.output, vec!["hi".to_string()]);
+        let out = run("print(\"hi\"); print(cube(2).faces().len()); cube(1)").unwrap();
+        assert_eq!(out.output, vec!["hi".to_string(), "6".to_string()]);
+        assert!(out.script_ms >= 0.0);
     }
 
     #[test]
     fn output_is_capped_and_truncated() {
-        let c = CancelToken::new();
-        let out = compile("for i in 0..150 { print(i) } x", &limits(), &c).unwrap();
+        let out = run("for i in 0..150 { print(i) } cube(1)").unwrap();
         assert_eq!(out.output.len(), MAX_OUTPUT_LINES);
         assert_eq!(out.output[99], "99");
 
         // Long lines are cut on a char boundary: "é" is two bytes, so 1024
         // bytes falls exactly between characters but 1023 does not.
         let accents = "let s = \"\"; for i in 0..600 { s += \"é\"; }";
-        let out = compile(&format!("{accents} print(s); x"), &limits(), &c).unwrap();
+        let out = run(&format!("{accents} print(s); cube(1)")).unwrap();
         let line = &out.output[0];
         assert!(line.ends_with('…'));
         assert_eq!(line.len(), MAX_OUTPUT_LINE_LEN + '…'.len_utf8());
-        let out = compile(&format!("{accents} print(\"a\" + s); x"), &limits(), &c).unwrap();
+        let out = run(&format!("{accents} print(\"a\" + s); cube(1)")).unwrap();
         assert_eq!(
             out.output[0].len(),
             MAX_OUTPUT_LINE_LEN - 1 + '…'.len_utf8()
@@ -341,8 +344,7 @@ mod tests {
 
     #[test]
     fn debug_output_includes_position() {
-        let c = CancelToken::new();
-        let out = compile("debug(\"here\"); x", &limits(), &c).unwrap();
+        let out = run("debug(\"here\"); cube(1)").unwrap();
         assert!(
             out.output[0].starts_with("[line 1, position 1]"),
             "{:?}",
@@ -353,36 +355,11 @@ mod tests {
 
     #[test]
     fn string_size_limit() {
-        let c = CancelToken::new();
         let l = ScriptLimits {
             max_string_size: 64,
             ..limits()
         };
-        let r = compile("let s = \"a\"; for i in 0..10 { s += s; } x", &l, &c);
+        let r = compile("let s = \"a\"; for i in 0..10 { s += s; } cube(1)", &l);
         assert!(matches!(r, Err(ApiError::LimitExceeded(m)) if m.contains("size")));
-    }
-
-    #[test]
-    fn free_variables_are_rejected() {
-        let mut ctx = Context::new();
-        let x = ctx.x();
-        let v = ctx.var(Var::new());
-        let root = ctx.add(x, v).unwrap();
-        assert!(matches!(
-            check_vars(&ctx, root),
-            Err(ApiError::Unprocessable(_))
-        ));
-        assert!(check_vars(&ctx, x).is_ok());
-    }
-
-    #[test]
-    fn math_constants_and_node_count() {
-        let c = CancelToken::new();
-        let base = compile("x", &limits(), &c).unwrap().nodes;
-        let out = compile("x + PI", &limits(), &c).unwrap();
-        // One node for the constant and one for the sum
-        assert_eq!(out.nodes, base + 2);
-        assert!(out.compile_ms >= 0.0);
-        assert!(out.output.is_empty());
     }
 }

@@ -4,8 +4,10 @@
 > scratchcad is under active development. APIs, tools and script syntax may
 > change without notice, and things may break between commits.
 
-scratchcad is a rust based solid modelling API, plus a local MCP server and
-editor so AI assistants (and you) can use it.
+scratchcad is a rust based solid modelling API built on the
+[OpenCASCADE](https://dev.opencascade.org) CAD kernel, plus a local MCP server
+and editor so AI assistants (and you) can use it. Parts are Rhai scripts that
+build exact B-rep solids, which export to STEP, IGES, BREP, STL, OBJ and 3MF.
 
 ## Quick start (requires docker)
 
@@ -26,6 +28,9 @@ Then start the server, and the MCP server with the editor:
 docker compose up --build        # or `docker compose watch` to reload on edits
 ```
 
+The first build compiles the service and its dependencies, which takes a few
+minutes; OpenCASCADE itself comes prebuilt from Debian.
+
 Open the editor at <http://localhost:8000>.
 
 The mcp is already configured localy through .mcp.json
@@ -34,6 +39,9 @@ For clients that don't support .mcp.json, point them at `http://localhost:8000/m
 streamable HTTP transport.
 
 ## Examples
+
+These were made with scratchcad 0.3, before the move from implicit surfaces
+to OpenCASCADE.
 
 | prompt (using opus 5.5 medium through cc) | output |
 |---|---|
@@ -60,29 +68,39 @@ server, edits under `mcp/web` hot-reload in the browser, and changes to
 image. To require an API token, put
 `SCRATCHCAD_API_TOKEN=<16+ characters>` in a `.env` file next to `compose.yaml`.
 
-## Scripts, the editor and STL files
+## Scripts, the editor and exports
 
 The agent delivers a part as a Rhai script, saved to `./output` with the
 `save_script` tool, which also gives the agent a link to it in the editor at
-<http://localhost:8000>:
+<http://localhost:8000>. A script builds the part from solids, sketches,
+booleans, fillets and the like:
+
+```rhai
+let width = 80.0; // [40, 120] Width (mm)
+let plate = box_centered(width, 50, 6).fillet(5, "|Z");
+plate - cylinder([0, 0, -5], "Z", 10, 10)
+```
+
+In the editor:
 
 - the part fills most of the window, with sliders for its dimensions beside
   it; moving one re-meshes the part a moment later, and the view follows the
   part as it grows or shrinks (**Auto-fit**, on by default)
-- **Files** slides out a list of scripts and exported meshes, and tucks itself
-  away once you pick one
+- **Files** slides out a list of scripts and exports, and tucks itself away
+  once you pick one; STL files open in the view, other formats download
 - **Script** swaps the sliders for the Rhai source, for editing by hand, with
   errors marked on their line; you never need it to change the part's
   dimensions
-- **Export STL** meshes the script and writes an `.stl` next to it, at the
-  detail chosen under **Region & detail**
+- **Export** writes the part next to the script as STEP, IGES, BREP, STL, OBJ
+  or 3MF, chosen under **Detail & export** along with how finely meshes follow
+  curved surfaces
 
 The sliders come from the script's top-level `let` lines, which the agent is
 told to write with a plain-language label, a unit and a range, for example
 `let thread_length = 26.0; // [10, 60] Thread length (mm)`. `save_script` tells
 the agent which sliders it made and which are unclear, so it can fix them.
 
-The agent only exports an STL itself when you ask it to. If you edit a script
+The agent only exports a file itself when you ask it to. If you edit a script
 and then ask the agent for changes, it reads your version first; if it
 changes a script while you have unsaved edits, the editor asks which version
 to keep.
@@ -91,8 +109,8 @@ to keep.
 
 | directory | what it is | where it runs |
 |---|---|---|
-| [`server/`](server) | The scratchcad HTTP service (Rust 1.98, [Fidget](https://github.com/mkeeter/fidget) + axum). Validates, evaluates, renders and meshes [Rhai](https://rhai.rs) scripts that describe implicit surfaces. It is stateless and never touches your files. | anywhere: locally in Docker, or on another machine |
-| [`mcp/`](mcp) | The MCP server and editor (TypeScript, [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [React](https://react.dev), [Vite](https://vite.dev), [CodeMirror](https://codemirror.net), [three.js](https://threejs.org)). Gives a model tools to write a script, look at renders, measure the part and save it, and gives you an editor with a live 3D preview, parameter sliders and STL export. | always on your machine, next to the files it reads and writes |
+| [`server/`](server) | The scratchcad HTTP service (Rust 1.99, [OpenCASCADE](https://dev.opencascade.org) through [scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs), and axum). Runs [Rhai](https://rhai.rs) scripts that build B-rep solids, then measures, renders and exports them. It is stateless and never touches your files. | anywhere: locally in Docker, or on another machine |
+| [`mcp/`](mcp) | The MCP server and editor (TypeScript, [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [React](https://react.dev), [Vite](https://vite.dev), [CodeMirror](https://codemirror.net), [three.js](https://threejs.org)). Gives a model tools to write a script, look at renders, measure the part, save it and export it, and gives you an editor with a live 3D preview, parameter sliders and export to every format. | always on your machine, next to the files it reads and writes |
 
 The two talk over HTTP: the MCP server reaches scratchcad at `SCRATCHCAD_URL`,
 so it works with a local build, the dev container, or a deployed instance
@@ -102,9 +120,16 @@ adds the API token, so the token never reaches the browser.
 
 ## License
 
-scratchcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies, are listed
+scratchcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies are listed
 with their licenses in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).
 
-## Shoutout 
+scratchcad makes use of [Open CASCADE Technology](https://dev.opencascade.org), which is
+licensed under the LGPL 2.1 with the Open CASCADE exception, through
+[scratchcad-occt-rs](https://github.com/scratchcad/scratchcad-occt-rs) (LGPL 2.1).
 
-A huge shoutout to Matt Keeter the developer of [Fidget](https://github.com/mkeeter/fidget), scratchcad uses fidget as the core implicit kernal and this project would not be possible without fidget.
+## Shoutout
+
+scratchcad models with [Open CASCADE Technology](https://dev.opencascade.org), and its bindings
+started as a fork of [opencascade-rs](https://github.com/bschwind/opencascade-rs) by Brian
+Schwind. Versions up to 0.3 were built on [Fidget](https://github.com/mkeeter/fidget), Matt
+Keeter's implicit surface kernel, and the project would not exist without it.

@@ -4,48 +4,38 @@ use clap::Parser;
 use scratchcad::{
     AppState,
     config::{Config, LogFormat},
+    jobs::Worker,
 };
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `scratchcad worker` runs one job for the server; see `worker`.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "worker")
+    {
+        return scratchcad::worker::main();
+    }
     let config = Config::parse();
     config.validate()?;
     init_tracing(config.log_format);
-
-    // Dedicated Rayon pool for Fidget, sized independently of Tokio's workers.
-    let threads = config
-        .render_threads
-        .map(|n| n.get())
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()));
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(|i| format!("fidget-{i}"))
-        .build()?;
+    let worker = Worker::current_exe()?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let result = rt.block_on(serve(
-        config,
-        fidget::render::ThreadPool::Custom(pool),
-        threads,
-    ));
-    // Abandoned blocking jobs have been cancelled and normally stop quickly;
-    // never let a stuck one hold the process open indefinitely.
+    let result = rt.block_on(serve(config, worker));
+    // Dropping the runtime drops the jobs still running, which kills their
+    // workers; never let anything hold the process open indefinitely.
     rt.shutdown_timeout(Duration::from_secs(5));
     tracing::info!("shutdown complete");
     result
 }
 
-async fn serve(
-    config: Config,
-    pool: fidget::render::ThreadPool,
-    threads: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve(config: Config, worker: Worker) -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     tracing::info!(
         addr = %listener.local_addr()?,
-        render_threads = threads,
         max_concurrent_jobs = config.max_concurrent_jobs,
         auth = config.api_token.is_some(),
         "listening"
@@ -54,7 +44,7 @@ async fn serve(
         tracing::warn!("SCRATCHCAD_API_TOKEN is not set; the API is unauthenticated");
     }
 
-    let state = AppState::new(config, pool);
+    let state = AppState::new(config, worker);
     let app = scratchcad::router(state.clone());
 
     let drain = state.clone();

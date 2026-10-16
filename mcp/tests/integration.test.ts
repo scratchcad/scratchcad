@@ -14,6 +14,9 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { nodeSend } from "../src/client.ts";
+import { EXAMPLES } from "../src/guide.ts";
+import { parseParams, setParam } from "../src/shared/params.ts";
+import { NEW_SCRIPT } from "../web/src/lib/template.ts";
 import { connect, tempDir, testSettings, TOOLS } from "./helpers.ts";
 
 const MCP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,10 +25,11 @@ const TOKEN = "integration-test-token";
 
 // A 20 x 20 x 20 cube with a 5 mm hole through it along z.
 const CUBE = `
-let block = box(#{ lower: [-10, -10, -10], upper: [10, 10, 10] });
-let hole = extrude_z(#{ shape: circle(#{ radius: 2.5 }), lower: -11, upper: 11 });
-draw(difference(#{ shape: block, cutout: hole }))
+let block = box_centered(20, 20, 20);
+let hole = cylinder([0, 0, -11], "Z", 2.5, 22);
+draw(block - hole)
 `;
+const CUBE_VOLUME = 8000 - Math.PI * 2.5 ** 2 * 20;
 
 function findScratchcad(): string | null {
   const explicit = process.env.SCRATCHCAD_BIN;
@@ -99,76 +103,80 @@ describe.skipIf(binary === null)("against a real scratchcad", () => {
   it("runs the whole modelling workflow", async () => {
     const { client, out } = await realClient();
     const validated = await call(client, "validate_script", { script: CUBE });
-    expect(validated.structuredContent!.nodes).toBeGreaterThan(0);
-
-    // Measure: the hole's center is empty, the walls sit at x = ±10.
-    const measured = await call(client, "evaluate", {
-      script: CUBE,
-      points: [
-        [0, 0, 0],
-        [5, 0, 0],
-        [9.9, 0, 0],
-        [10.1, 0, 0],
-      ],
-    });
-    const [hole, solid, insideWall, outsideWall] = measured.structuredContent!.values as number[];
-    expect(hole).toBeGreaterThan(0);
-    expect(solid).toBeLessThan(0);
-    expect(insideWall).toBeLessThan(0);
-    expect(outsideWall).toBeGreaterThan(0);
-
-    const interval = await call(client, "evaluate", {
-      script: CUBE,
-      mode: "interval",
-      intervals: [
-        [
-          [20, 30],
-          [20, 30],
-          [20, 30],
-        ],
-      ],
-    });
-    expect(interval.structuredContent!.intervals[0][0]).toBeGreaterThan(0);
+    const shape = validated.structuredContent!.shape;
+    expect(shape).toMatchObject({ type: "solid", solids: 1, valid: true });
+    expect(shape.bounding_box.size).toEqual([20, 20, 20]);
+    expect(shape.volume).toBeCloseTo(CUBE_VOLUME, 6);
+    expect(validated.structuredContent!.warnings).toEqual([]);
 
     for (const [tool, extra] of [
       ["render_2d", {}],
-      ["render_3d", { ssao: false }],
+      ["render_2d", { mode: "outline", center: [0, 0], half_size: 15 }],
+      ["render_3d", {}],
+      ["render_3d", { mode: "heightmap", perspective: 0.3, pitch: 90, roll: 0 }],
     ] as const) {
-      const result = await call(client, tool, {
-        script: CUBE,
-        width: 64,
-        height: 64,
-        half_size: 18,
-        ...extra,
-      });
+      const result = await call(client, tool, { script: CUBE, width: 64, height: 64, ...extra });
+      expect(result.isError).toBeUndefined();
       expect(result.content[0]!.type).toBe("image");
       expect(Buffer.from(result.content[0]!.data!, "base64").subarray(0, 8)).toEqual(
         Buffer.from("\x89PNG\r\n\x1a\n", "latin1"),
       );
+      expect(result.content[1]!.text).toMatch(/^View: center=\[[-\d.,e]+\] half_size=[\d.]+\./);
     }
 
-    const exported = await call(client, "export_stl", {
-      script: CUBE,
-      path: "cube.stl",
-      half_size: 12,
-      depth: 5,
-    });
+    const exported = await call(client, "export", { script: CUBE, path: "cube.stl" });
     const stl = fs.readFileSync(path.join(out, "cube.stl"));
     const triangles = stl.readUInt32LE(80);
     expect(triangles).toBeGreaterThan(0);
-    expect(exported.structuredContent).toMatchObject({ triangles, bytes: 84 + 50 * triangles });
-
-    // The saved script, region line included, is still a valid script.
-    const saved = await call(client, "save_script", {
-      script: CUBE,
-      path: "cube.rhai",
-      half_size: 12,
+    expect(exported.structuredContent).toMatchObject({
+      format: "stl",
+      triangles,
+      bytes: 84 + 50 * triangles,
+      warnings: [],
     });
-    expect(saved.structuredContent!.nodes).toBe(validated.structuredContent!.nodes);
+    // 1/1000 of the diagonal by default
+    expect(exported.structuredContent!.tolerance).toBeCloseTo(Math.sqrt(3) * 20 * 1e-3, 9);
+    const step = await call(client, "export", { script: CUBE, path: "cube.step" });
+    expect(step.structuredContent).toMatchObject({ format: "step", triangles: null });
+    expect(fs.readFileSync(path.join(out, "cube.step"), "latin1")).toMatch(/^ISO-10303-21;/);
+    await call(client, "export", { script: CUBE, path: "cube.3mf", tolerance: 0.1 });
+    expect(fs.readFileSync(path.join(out, "cube.3mf")).subarray(0, 4).toString("latin1")).toBe(
+      "PK\x03\x04",
+    );
+
+    const saved = await call(client, "save_script", { script: CUBE, path: "cube.rhai" });
+    expect(saved.structuredContent!.shape).toEqual(shape);
     const read = await call(client, "read_script", { path: "cube.rhai" });
-    expect(read.structuredContent!.half_size).toBe(12);
     const again = await call(client, "validate_script", { script: read.structuredContent!.script });
-    expect(again.structuredContent!.nodes).toBe(validated.structuredContent!.nodes);
+    expect(again.structuredContent!.shape).toEqual(shape);
+
+    // Scripts saved with the old region line still run: it is a comment.
+    const old = `// region: center=[0, 0, 0] half_size=12\n${CUBE}`;
+    const legacy = await call(client, "validate_script", { script: old });
+    expect(legacy.structuredContent!.shape).toEqual(shape);
+  });
+
+  it("runs the guide's examples", async () => {
+    const { client } = await realClient();
+    for (const [name, script] of Object.entries(EXAMPLES)) {
+      const result = await call(client, "validate_script", { script });
+      expect(result.isError, `${name}: ${result.content[0]!.text}`).toBeUndefined();
+      expect(result.structuredContent!.shape).toMatchObject({ solids: 1, valid: true });
+    }
+  });
+
+  it("builds the new-script template at both ends of every slider", async () => {
+    const { client } = await realClient();
+    for (const end of ["min", "max"] as const) {
+      let script = NEW_SCRIPT;
+      // From the last parameter back, so earlier offsets stay valid.
+      for (const param of parseParams(NEW_SCRIPT).reverse()) {
+        script = setParam(script, param, param[end]);
+      }
+      const result = await call(client, "validate_script", { script });
+      expect(result.isError, `${end}: ${result.content[0]!.text}`).toBeUndefined();
+      expect(result.structuredContent!.shape).toMatchObject({ solids: 1, valid: true });
+    }
   });
 
   it("makes script errors readable", async () => {
@@ -208,12 +216,7 @@ describe.skipIf(binary === null)("against a real scratchcad", () => {
         stderr: "ignore",
       }),
     );
-    await call(client, "export_stl", {
-      script: CUBE,
-      path: "out/cube.stl",
-      half_size: 12,
-      depth: 4,
-    });
+    await call(client, "export", { script: CUBE, path: "out/cube.stl" });
     await client.close();
     expect(fs.statSync(path.join(out, "out", "cube.stl")).size).toBeGreaterThan(84);
   });

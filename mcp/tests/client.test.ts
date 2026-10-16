@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { nodeSend, ScratchcadClient, ScratchcadError, TimeoutError } from "../src/client.ts";
-import { FakeScratchcad, PNG, response, scratchcadError } from "./helpers.ts";
+import { FakeScratchcad, PNG, response, scratchcadError, VALIDATED } from "./helpers.ts";
 
 const settings = { url: "http://scratchcad.test", apiToken: null, timeoutS: 60 };
 
@@ -22,11 +22,7 @@ async function failure(promise: Promise<unknown>): Promise<ScratchcadError> {
 describe("ScratchcadClient", () => {
   it("posts JSON to the configured server", async () => {
     const fake = new FakeScratchcad();
-    expect(await api(fake).validate({ script: "x" })).toEqual({
-      nodes: 9,
-      output: ["hi"],
-      compile_ms: 0.8,
-    });
+    expect(await api(fake).validate({ script: "x" })).toEqual(VALIDATED);
     expect(fake.last.url.href).toBe("http://scratchcad.test/v1/scripts/validate");
     expect(fake.last.options.headers).toEqual({
       "user-agent": "scratchcad-mcp",
@@ -54,15 +50,17 @@ describe("ScratchcadClient", () => {
   it("hits each endpoint's route", async () => {
     const fake = new FakeScratchcad();
     const client = api(fake);
-    expect((await client.eval({ script: "x" })).values).toEqual([-1]);
+    await client.validate({ script: "x" });
     await client.raster2d({ script: "x" });
     await client.raster3d({ script: "x" });
-    await client.exportStl({ script: "x" });
+    await client.export("stl", { script: "x" });
+    await client.export("step", { script: "x" });
     expect(fake.requests.map((r) => r.url.pathname)).toEqual([
-      "/v1/eval",
+      "/v1/scripts/validate",
       "/v1/raster/2d",
       "/v1/raster/3d",
       "/v1/export/stl",
+      "/v1/export/step",
     ]);
   });
 
@@ -72,11 +70,23 @@ describe("ScratchcadClient", () => {
       data: PNG,
       computeMs: 12.5,
       triangles: null,
+      tolerance: 0.04,
+      view: { center: [0, 0, 0], halfSize: 21.5 },
       warnings: [],
     });
-    expect(await client.exportStl({ script: "x" })).toMatchObject({
+    expect((await client.raster2d({ script: "x" })).view).toEqual({
+      center: [0, 0],
+      halfSize: 16.2,
+    });
+    expect(await client.export("stl", { script: "x" })).toMatchObject({
       computeMs: 40.25,
       triangles: 1234,
+      tolerance: 0.0374,
+      view: null,
+    });
+    expect(await client.export("step", { script: "x" })).toMatchObject({
+      triangles: null,
+      tolerance: null,
     });
   });
 
@@ -84,26 +94,39 @@ describe("ScratchcadClient", () => {
     const fake = new FakeScratchcad();
     fake.handler = () =>
       response(200, "stl", {
-        "x-warning": ["the shape reaches the boundary on its -x, +x side(s)", "second"],
+        "x-warning": ["the shape is a face with no solids, so the mesh is not watertight", "2"],
       });
-    expect((await api(fake).exportStl({ script: "x" })).warnings).toEqual([
-      "the shape reaches the boundary on its -x, +x side(s)",
-      "second",
+    expect((await api(fake).export("stl", { script: "x" })).warnings).toEqual([
+      "the shape is a face with no solids, so the mesh is not watertight",
+      "2",
     ]);
   });
 
   it("ignores missing or garbled numeric headers", async () => {
     const fake = new FakeScratchcad();
     fake.handler = () =>
-      response(200, "stl", { "x-compute-ms": "fast", "x-triangle-count": "1.5" });
-    expect(await api(fake).exportStl({ script: "x" })).toMatchObject({
+      response(200, "stl", {
+        "x-compute-ms": "fast",
+        "x-triangle-count": "1.5",
+        "x-view-center": "1,,2",
+        "x-view-half-size": "3",
+      });
+    expect(await api(fake).export("stl", { script: "x" })).toMatchObject({
       computeMs: null,
       triangles: null,
+      tolerance: null,
+      view: null,
     });
-    fake.handler = () => response(200, "stl", { "x-compute-ms": " ", "x-triangle-count": "7" });
-    expect(await api(fake).exportStl({ script: "x" })).toMatchObject({
+    fake.handler = () =>
+      response(200, "stl", {
+        "x-compute-ms": " ",
+        "x-triangle-count": "7",
+        "x-view-center": "1,2",
+      });
+    expect(await api(fake).export("stl", { script: "x" })).toMatchObject({
       computeMs: null,
       triangles: 7,
+      view: null,
     });
   });
 
@@ -135,7 +158,7 @@ describe("ScratchcadClient", () => {
   ])("reports status and body for other errors (%#)", async (reply, expected) => {
     const fake = new FakeScratchcad();
     fake.handler = () => reply;
-    const error = await failure(api(fake).eval({ script: "x" }));
+    const error = await failure(api(fake).validate({ script: "x" }));
     expect(error.message.startsWith(`scratchcad returned ${expected}`)).toBe(true);
     expect([error.code, error.status]).toEqual([null, reply.status]);
   });
@@ -150,7 +173,7 @@ describe("ScratchcadClient", () => {
   ])("names the request id of server failures (%#)", async (reply) => {
     const fake = new FakeScratchcad();
     fake.handler = () => reply;
-    const error = await failure(api(fake).eval({ script: "x" }));
+    const error = await failure(api(fake).validate({ script: "x" }));
     expect(error.message.endsWith("logged the details under request id abc-123)")).toBe(true);
   });
 
@@ -158,13 +181,13 @@ describe("ScratchcadClient", () => {
     const fake = new FakeScratchcad();
     fake.handler = () =>
       response(422, { error: { code: "script_error", message: "oops" } }, { "x-request-id": "a" });
-    expect((await failure(api(fake).eval({ script: "x" }))).message).toBe("script_error: oops");
+    expect((await failure(api(fake).validate({ script: "x" }))).message).toBe("script_error: oops");
   });
 
   it("truncates long error bodies", async () => {
     const fake = new FakeScratchcad();
     fake.handler = () => response(500, "x".repeat(5000));
-    expect((await failure(api(fake).eval({ script: "x" }))).message.length).toBeLessThan(600);
+    expect((await failure(api(fake).validate({ script: "x" }))).message.length).toBeLessThan(600);
   });
 
   it("names the URL when scratchcad can't be reached", async () => {
@@ -191,7 +214,7 @@ describe("ScratchcadClient", () => {
   it("forwards raw responses, errors included", async () => {
     const fake = new FakeScratchcad();
     fake.handler = scratchcadError(422, "script_error", "nope");
-    const raw = await api(fake).forward("/v1/eval", '{"script":"x"}');
+    const raw = await api(fake).forward("/v1/scripts/validate", '{"script":"x"}');
     expect(raw.status).toBe(422);
     expect(fake.last.options.body).toBe('{"script":"x"}');
   });
@@ -207,7 +230,9 @@ describe("nodeSend", () => {
     const server = http.createServer(handler);
     servers.push(server);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    return new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/eval`);
+    return new URL(
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/scripts/validate`,
+    );
   }
 
   it("posts the body and keeps repeated headers apart", async () => {

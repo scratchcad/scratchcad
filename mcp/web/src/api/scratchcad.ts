@@ -1,28 +1,39 @@
 // The scratchcad service, reached through scratchcad-mcp's /api/scratchcad
 // proxy, which adds the API token (if there is one) so the page never sees it.
-import type { Vec3 } from "../../../src/shared/region.ts";
+import type { Format } from "../../../src/shared/formats.ts";
 import { errorFrom } from "./errors";
 
 const BASE = "/api/scratchcad/v1";
 
-export interface Validated {
-  nodes: number;
-  output: string[];
-  compileMs: number;
+/** What scratchcad reports about the shape a script builds. */
+export interface ShapeSummary {
+  type: string;
+  solids: number;
+  faces: number;
+  edges: number;
+  vertices: number;
+  valid: boolean;
+  bounding_box: { min: number[]; max: number[]; size: number[] };
+  volume: number;
+  area: number;
+  center: number[];
 }
 
-export interface Mesh {
-  stl: ArrayBuffer;
+export interface Validated {
+  shape: ShapeSummary;
+  output: string[];
+  warnings: string[];
+  scriptMs: number;
+}
+
+/** An exported file: a mesh for the preview, or any format for saving. */
+export interface Exported {
+  data: ArrayBuffer;
+  /** Mesh formats only. */
   triangles: number | null;
+  tolerance: number | null;
   computeMs: number | null;
   warnings: string[];
-}
-
-export interface MeshRequest {
-  script: string;
-  center: Vec3;
-  halfSize: number;
-  depth: number;
 }
 
 async function post(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
@@ -38,32 +49,36 @@ async function post(path: string, body: unknown, signal?: AbortSignal): Promise<
 
 export async function validate(script: string, signal?: AbortSignal): Promise<Validated> {
   const response = await post("/scripts/validate", { script }, signal);
-  const body = (await response.json()) as { nodes: number; output: string[]; compile_ms: number };
-  return { nodes: body.nodes, output: body.output, compileMs: body.compile_ms };
+  const body = (await response.json()) as Omit<Validated, "scriptMs"> & { script_ms: number };
+  return {
+    shape: body.shape,
+    output: body.output,
+    warnings: body.warnings,
+    scriptMs: body.script_ms,
+  };
 }
 
-export async function mesh(request: MeshRequest, signal?: AbortSignal): Promise<Mesh> {
-  const response = await post(
-    "/export/stl",
-    {
-      script: request.script,
-      center: request.center,
-      half_size: request.halfSize,
-      depth: request.depth,
-    },
-    signal,
-  );
+/**
+ * The shape as a file. `tolerance` applies to mesh formats (STL, OBJ, 3MF);
+ * leave it unset for scratchcad's default.
+ */
+export async function exportShape(
+  format: Format,
+  request: { script: string; tolerance?: number },
+  signal?: AbortSignal,
+): Promise<Exported> {
+  const response = await post(`/export/${format}`, request, signal);
   const number = (name: string) => {
     const value = response.headers.get(name);
     return value === null ? null : Number(value);
   };
-  // The service sends one x-warning header per warning; fetch joins repeats
-  // with ", ". Meshing reports at most one warning, so this is exact.
-  const warning = response.headers.get("x-warning");
+  // The proxy sends the warnings as one JSON array (see src/app.ts).
+  const warnings = response.headers.get("x-warnings");
   return {
-    stl: await response.arrayBuffer(),
+    data: await response.arrayBuffer(),
     triangles: number("x-triangle-count"),
+    tolerance: number("x-mesh-tolerance"),
     computeMs: number("x-compute-ms"),
-    warnings: warning ? [warning] : [],
+    warnings: warnings ? (JSON.parse(warnings) as string[]) : [],
   };
 }

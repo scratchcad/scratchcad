@@ -2,13 +2,25 @@
 #
 # Development image for the scratchcad service; see ../compose.yaml. It builds
 # with the dev profile (debug assertions and overflow checks on, fast
-# incremental rebuilds) but with optimisation turned up: Fidget's generic
-# meshing and rendering code is compiled inside this crate, and at opt-level
-# 0 it runs ~50x slower than release. At these levels an STL export is ~1.6x
-# release time and an incremental rebuild still takes about two seconds.
+# incremental rebuilds) but with optimisation turned up: the renderer and the
+# mesh writers are this crate's own Rust code, which runs many times slower at
+# opt-level 0. OpenCASCADE itself is Debian's prebuilt library.
 # For the production image, see Dockerfile.
 
-FROM rust:1.98-bookworm
+# Keep the Rust version in step with `rust-version` in Cargo.toml.
+FROM rust:1.99-trixie
+
+# scratchcad-occt-rhai links the system's OpenCASCADE 7.8, which Debian 13
+# packages; its build script finds it with CMake.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      cmake \
+      libocct-foundation-dev \
+      libocct-modeling-data-dev \
+      libocct-modeling-algorithms-dev \
+      libocct-ocaf-dev \
+      libocct-data-exchange-dev \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 ENV CARGO_TARGET_DIR=/target \

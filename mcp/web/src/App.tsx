@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "./api/errors";
-import { type FileEntry, readMesh, readScript, writeFile } from "./api/files";
-import { mesh } from "./api/scratchcad";
+import { type FileEntry, fileUrl, readExport, readScript, writeFile } from "./api/files";
+import { exportShape } from "./api/scratchcad";
 import { Drawer } from "./components/Drawer";
+import { ExportPanel } from "./components/ExportPanel";
 import { FileList } from "./components/FileList";
 import { ParamsPanel } from "./components/ParamsPanel";
 import { ProblemsPanel } from "./components/ProblemsPanel";
-import { RegionPanel } from "./components/RegionPanel";
 import { CodeEditor } from "./editor/CodeEditor";
 import { useFiles, usePreview } from "./hooks";
+import { type Format, FORMAT_INFO } from "../../src/shared/formats.ts";
 import { parseParams, setParam, stableRanges } from "../../src/shared/params.ts";
-import { DEFAULT_REGION, parseRegion, regionAround, setRegion } from "../../src/shared/region.ts";
+import { EXPORT_DETAIL, PREVIEW_DETAIL, toleranceFor } from "./lib/detail";
 import { NEW_SCRIPT } from "./lib/template";
 import type { MeshInfo } from "./viewport/Viewport";
 import { ViewportView } from "./viewport/ViewportView";
@@ -19,10 +20,18 @@ type Open =
   | { kind: "script"; path: string; version: string; saved: string }
   | { kind: "mesh"; path: string; version: string; stl: ArrayBuffer };
 
+/** A button or download link on a notice. */
+interface Action {
+  label: string;
+  href?: string;
+  onClick?: () => void;
+}
+
 interface Notice {
   id: number;
   tone: "info" | "error";
   text: string;
+  action?: Action;
 }
 
 /** The file changed on disk while there were unsaved edits (or a save hit 409). */
@@ -43,8 +52,9 @@ export default function App() {
   const [drawer, setDrawer] = useState<"files" | null>("files");
   // The right-hand panel shows the sliders, or the script in their place.
   const [panel, setPanel] = useState<"sliders" | "script">("sliders");
-  const [previewDepth, setPreviewDepth] = useState(10);
-  const [exportDepth, setExportDepth] = useState(10);
+  const [previewDetail, setPreviewDetail] = useState(PREVIEW_DETAIL);
+  const [exportDetail, setExportDetail] = useState(EXPORT_DETAIL);
+  const [exportFormat, setExportFormat] = useState<Format>("stl");
   const [exporting, setExporting] = useState(false);
   // Where the script editor should put the cursor when it next opens.
   const [reveal, setReveal] = useState<{ line: number; column: number; key: number } | null>(null);
@@ -58,7 +68,7 @@ export default function App() {
 
   const script = open?.kind === "script" ? text : null;
   const dirty = open?.kind === "script" && text !== open.saved;
-  const preview = usePreview(open?.path ?? null, script, previewDepth);
+  const preview = usePreview(open?.path ?? null, script, previewDetail);
   const saved = open?.kind === "script" ? open.saved : null;
   // Ranges guessed for parameters without one come from the saved script, so
   // they stay put (and the slider thumb moves) while the value is dragged.
@@ -67,17 +77,14 @@ export default function App() {
     () => (script === null ? [] : stableRanges(parseParams(script), baseline)),
     [script, baseline],
   );
-  const recordedRegion = script === null ? null : parseRegion(script);
-  const region = recordedRegion ?? DEFAULT_REGION;
-  const clipped = preview.problems.some((p) => p.message.includes("reaches the boundary"));
   const errors = preview.problems.filter((p) => p.severity === "error");
 
-  const notify = useCallback((tone: Notice["tone"], text: string) => {
+  const notify = useCallback((tone: Notice["tone"], text: string, action?: Action) => {
     const id = Date.now() + Math.random();
-    setNotices((n) => [...n, { id, tone, text }]);
+    setNotices((n) => [...n, { id, tone, text, action }]);
     setTimeout(
       () => setNotices((n) => n.filter((x) => x.id !== id)),
-      tone === "error" ? 8000 : 4000,
+      tone === "error" || action ? 8000 : 4000,
     );
   }, []);
 
@@ -90,8 +97,12 @@ export default function App() {
           listed.current = false;
           setOpen({ kind: "script", path: file.path, version, saved: text });
           setText(text);
+        } else if (file.format !== undefined && file.format !== "stl") {
+          // Only STL meshes can be shown; the file list offers the rest as downloads.
+          notify("error", `${file.path} can't be shown here; download it from Files instead.`);
+          return false;
         } else {
-          const stl = await readMesh(file.path);
+          const stl = await readExport(file.path);
           const version = file.version ?? "";
           seen.current = new Set([version]);
           listed.current = false;
@@ -202,23 +213,29 @@ export default function App() {
     }
   };
 
-  const exportStl = async () => {
+  /** Writes the script's shape next to it, in the chosen format. */
+  const exportPart = async () => {
     if (open?.kind !== "script") return;
-    const path = open.path.replace(/\.rhai$/i, "") + ".stl";
+    const info = FORMAT_INFO[exportFormat];
+    const path = open.path.replace(/\.rhai$/i, "") + info.extensions[0];
     const exists = files?.some((f) => f.path === path) ?? false;
     if (exists && !window.confirm(`Replace ${path}?`)) return;
     setExporting(true);
     try {
-      const result = await mesh({
-        script: text,
-        center: region.center,
-        halfSize: region.halfSize,
-        depth: exportDepth,
-      });
-      await writeFile(path, result.stl, exists ? null : "new");
+      // Mesh detail is relative to the size of the part the preview last built.
+      const size = preview.shape?.bounding_box.size ?? null;
+      const tolerance = info.mesh ? toleranceFor(exportDetail, size) : undefined;
+      const result = await exportShape(exportFormat, { script: text, tolerance });
+      const entry = await writeFile(path, result.data, exists ? null : "new");
       refresh();
-      const triangles = result.triangles?.toLocaleString() ?? "?";
-      notify("info", `Exported ${path} (${triangles} triangles).`);
+      const triangles =
+        result.triangles === null ? "" : ` (${result.triangles.toLocaleString()} triangles)`;
+      // STL files show here; the other formats are for other programs.
+      const action: Action =
+        exportFormat === "stl"
+          ? { label: "Show", onClick: () => void openFile(entry) }
+          : { label: "Download", href: fileUrl(path) };
+      notify("info", `Exported ${path}${triangles}.`, action);
       for (const warning of result.warnings) notify("error", `Warning: ${warning}`);
     } catch (e) {
       notify("error", `Export failed: ${message(e)}`);
@@ -309,10 +326,10 @@ export default function App() {
             type="button"
             className={button}
             disabled={open?.kind !== "script" || exporting}
-            onClick={() => void exportStl()}
-            title={`Mesh at detail ${exportDepth} and write an .stl next to the script`}
+            onClick={() => void exportPart()}
+            title={`Write ${FORMAT_INFO[exportFormat].use} next to the script (change the format under Detail & export)`}
           >
-            {exporting ? "Exporting…" : "Export STL"}
+            {exporting ? "Exporting…" : `Export ${FORMAT_INFO[exportFormat].label}`}
           </button>
         </div>
       </header>
@@ -409,7 +426,7 @@ export default function App() {
               </div>
               <ProblemsPanel
                 problems={preview.problems}
-                nodes={preview.nodes}
+                shape={preview.shape}
                 computeMs={preview.computeMs}
                 running={preview.running}
               />
@@ -440,20 +457,6 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {clipped && (
-                <div className="m-3 mb-0 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                  <p>The part is cut off at the edge of the meshed region.</p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setText((t) => setRegion(t, { ...region, halfSize: region.halfSize * 2 }))
-                    }
-                    className="mt-1.5 text-xs font-medium underline"
-                  >
-                    Make the region bigger
-                  </button>
-                </div>
-              )}
               <section className="p-4">
                 <div className="mb-4 flex items-baseline justify-between gap-2">
                   <h2 className="text-sm font-semibold">Parameters</h2>
@@ -474,23 +477,16 @@ export default function App() {
               </section>
               <details className="mt-auto border-t border-zinc-200 dark:border-zinc-800">
                 <summary className="cursor-pointer px-4 py-3 text-sm font-semibold select-none">
-                  Region & detail
+                  Detail & export
                 </summary>
                 <div className="px-4 pb-4">
-                  <RegionPanel
-                    region={region}
-                    recorded={recordedRegion !== null}
-                    clipped={clipped}
-                    previewDepth={previewDepth}
-                    exportDepth={exportDepth}
-                    canFit={meshInfo !== null && !preview.stale}
-                    onRegion={(r) => setText((t) => setRegion(t, r))}
-                    onFit={() =>
-                      meshInfo &&
-                      setText((t) => setRegion(t, regionAround(meshInfo.min, meshInfo.max)))
-                    }
-                    onPreviewDepth={setPreviewDepth}
-                    onExportDepth={setExportDepth}
+                  <ExportPanel
+                    previewDetail={previewDetail}
+                    exportDetail={exportDetail}
+                    format={exportFormat}
+                    onPreviewDetail={setPreviewDetail}
+                    onExportDetail={setExportDetail}
+                    onFormat={setExportFormat}
                   />
                 </div>
               </details>
@@ -530,6 +526,20 @@ export default function App() {
             }`}
           >
             {n.text}
+            {n.action &&
+              (n.action.href ? (
+                <a href={n.action.href} download className="ml-2 font-medium underline">
+                  {n.action.label}
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={n.action.onClick}
+                  className="ml-2 font-medium underline"
+                >
+                  {n.action.label}
+                </button>
+              ))}
           </div>
         ))}
       </div>

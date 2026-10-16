@@ -1,5 +1,5 @@
-// Rhai syntax highlighting and completions for the shapes and math that
-// Fidget's Rhai engine registers (fidget-rhai / fidget-shapes 0.5).
+// Rhai syntax highlighting and completions for the modelling functions that
+// scratchcad-occt-rhai registers (see its docs/rhai-api.md).
 import { type Completion, snippetCompletion } from "@codemirror/autocomplete";
 import {
   HighlightStyle,
@@ -13,45 +13,116 @@ const KEYWORDS = new Set([
   "let", "const", "if", "else", "switch", "while", "loop", "for", "in", "do", "until",
   "break", "continue", "return", "throw", "try", "catch", "fn", "private", "this",
 ]); // prettier-ignore
-const ATOMS = new Set(["true", "false", "x", "y", "z"]);
+const ATOMS = new Set(["true", "false"]);
 
-const SHAPES: [name: string, template: string, detail: string][] = [
-  ["sphere", "sphere(#{ radius: ${1.0}, center: [${0}, ${0}, ${0}] })", "3D"],
-  ["box", "box(#{ lower: [${-1}, ${-1}, ${-1}], upper: [${1}, ${1}, ${1}] })", "3D"],
-  ["circle", "circle(#{ radius: ${1.0}, center: [${0}, ${0}] })", "2D, infinite in z"],
-  ["rectangle", "rectangle(#{ lower: [${-1}, ${-1}], upper: [${1}, ${1}] })", "2D, infinite in z"],
-  ["union", "union([${a}, ${b}])", "combine shapes"],
-  ["intersection", "intersection([${a}, ${b}])", "overlap of shapes"],
-  ["difference", "difference(#{ shape: ${a}, cutout: ${b} })", "cut one shape from another"],
-  ["inverse", "inverse(#{ shape: ${a} })", "inside out"],
-  ["blend", "blend(#{ a: ${a}, b: ${b}, radius: ${0.1} })", "smooth union"],
-  ["move", "move(#{ shape: ${a}, offset: [${0}, ${0}, ${0}] })", "translate"],
-  ["scale", "scale(#{ shape: ${a}, scale: [${1}, ${1}, ${1}] })", "per-axis scale"],
-  ["scale_uniform", "scale_uniform(#{ shape: ${a}, scale: ${2.0} })", "uniform scale"],
-  ["rotate_x", "rotate_x(#{ shape: ${a}, angle: ${90.0} })", "degrees"],
-  ["rotate_y", "rotate_y(#{ shape: ${a}, angle: ${90.0} })", "degrees"],
-  ["rotate_z", "rotate_z(#{ shape: ${a}, angle: ${90.0} })", "degrees"],
-  ["reflect_x", "reflect_x(#{ shape: ${a}, offset: ${0.0} })", "mirror"],
-  ["reflect_y", "reflect_y(#{ shape: ${a}, offset: ${0.0} })", "mirror"],
-  ["reflect_z", "reflect_z(#{ shape: ${a}, offset: ${0.0} })", "mirror"],
-  ["extrude_z", "extrude_z(#{ shape: ${profile}, lower: ${-1.0}, upper: ${1.0} })", "2D to 3D"],
-  ["loft_z", "loft_z(#{ a: ${p}, b: ${q}, lower: ${-1.0}, upper: ${1.0} })", "blend profiles"],
-  ["revolve_y", "revolve_y(#{ shape: ${profile}, offset: ${0.0} })", "lathe about y"],
-  ["repeat_x", "repeat_x(#{ shape: ${a}, radius: ${1.0}, offset: ${0.0} })", "pattern"],
+/** Functions that make shapes and values: [name, snippet, what it makes]. */
+const CONSTRUCTORS: [name: string, template: string, detail: string][] = [
+  ["box", "box(${10}, ${10}, ${10})", "solid, corner at the origin"],
+  ["box_centered", "box_centered(${10}, ${10}, ${10})", "solid, centered"],
+  ["box_from_corners", "box_from_corners([${0}, ${0}, ${0}], [${10}, ${10}, ${10}])", "solid"],
+  ["cube", "cube(${10})", "solid"],
+  ["cylinder", "cylinder(${5}, ${10})", "solid, on the XY plane"],
+  ["cylinder", 'cylinder([${0}, ${0}, ${0}], "${Z}", ${5}, ${10})', "solid: base, axis, r, h"],
+  ["sphere", "sphere(${5})", "solid"],
+  ["sphere", "sphere([${0}, ${0}, ${0}], ${5})", "solid: center, r"],
+  ["cone", "cone(${5}, ${2}, ${10})", "solid: r1, r2, h"],
+  ["torus", "torus(${10}, ${2})", "solid: R, r"],
+  ["vertex", "vertex([${0}, ${0}, ${0}])", "point"],
+  ["line", "line([${0}, ${0}, ${0}], [${10}, ${0}, ${0}])", "edge"],
+  ["arc", "arc(${start}, ${mid}, ${end})", "edge through three points"],
+  ["circle", "circle(${5})", "closed wire"],
+  ["circle", 'circle("${XY}", ${5})', "closed wire in a plane"],
+  ["rect", "rect(${20}, ${10})", "closed wire, centered"],
+  ["polygon", "polygon([[${0}, ${0}], [${10}, ${0}], [${5}, ${8}]])", "closed wire"],
+  ["polyline", "polyline([${points}])", "open wire"],
+  ["spline", "spline([${points}])", "edge through points"],
+  ["bezier", "bezier([${points}])", "edge"],
+  ["wire", "wire([${edges}])", "wire from edges"],
+  ["face", "face(${wire})", "face from a closed wire"],
+  ["compound", "compound([${shapes}])", "group of shapes"],
+  ["fuse_all", "fuse_all([${shapes}])", "union of many shapes"],
+  ["loft", "loft([${sections}], true)", "solid through wires"],
+  ["sketch", 'sketch("${XY}")', "2D drawing in a plane"],
+  ["vec3", "vec3(${0}, ${0}, ${0})", "vector"],
+  ["plane", 'plane("${XY}")', "sketch plane"],
+  ["selection", "selection([${shapes}])", "list of shapes"],
   ["draw", "draw(${shape})", "output the shape"],
 ];
-const MATH = [
-  "min", "max", "abs", "sqrt", "square", "sin", "cos", "tan", "asin", "acos", "atan",
-  "atan2", "exp", "ln", "floor", "ceil", "round", "remap", "vec2", "vec3", "axes",
-]; // prettier-ignore
 
-const BUILTINS = new Set([...SHAPES.map(([name]) => name), ...MATH]);
+/** Methods, after a dot: [name, snippet or null for a plain call, what it does]. */
+const METHODS: [name: string, template: string | null, detail: string][] = [
+  ["translate", "translate([${0}, ${0}, ${0}])", "move"],
+  ["rotate", 'rotate("${Z}", ${90})', "about an axis, degrees"],
+  ["rotate_x", "rotate_x(${90})", "degrees"],
+  ["rotate_y", "rotate_y(${90})", "degrees"],
+  ["rotate_z", "rotate_z(${90})", "degrees"],
+  ["scale", "scale(${2})", "uniformly"],
+  ["mirror", 'mirror("${YZ}")', "across a plane"],
+  ["extrude", "extrude(${10})", "along the normal"],
+  ["revolve", 'revolve("${Z}", ${360})', "about an axis, degrees"],
+  ["sweep", "sweep(${path})", "along a path"],
+  ["fillet", 'fillet(${1}, "${|Z}")', "round edges"],
+  ["chamfer", 'chamfer(${0.5}, "${>Z}")', "bevel edges"],
+  ["shell", 'shell(${-1}, "${>Z}")', "hollow, opening faces"],
+  ["offset", "offset(${1})", "grow a 2D wire"],
+  ["fuse", "fuse(${other})", "boolean union (+)"],
+  ["cut", "cut(${other})", "boolean difference (-)"],
+  ["common", "common(${other})", "boolean intersection (&)"],
+  ["section", "section(${other})", "intersection curves"],
+  ["clean", null, "merge faces after booleans"],
+  ["to_face", null, "face from a closed wire"],
+  ["faces", 'faces("${>Z}")', "select faces"],
+  ["edges", 'edges("${|Z}")', "select edges"],
+  ["vertices", null, "select vertices"],
+  ["wires", null, "select wires"],
+  ["solids", null, "select solids"],
+  ["top_face", null, "highest face"],
+  ["bottom_face", null, "lowest face"],
+  ["volume", null, "measure"],
+  ["area", null, "measure"],
+  ["length", null, "measure"],
+  ["center", null, "center of mass"],
+  ["bounding_box", null, "measure"],
+  ["distance", "distance(${other})", "measure"],
+  ["contains", "contains([${0}, ${0}, ${0}])", "point inside?"],
+  ["classify", "classify([${0}, ${0}, ${0}])", '"inside", "outside" or "on"'],
+  ["is_valid", null, "check"],
+  ["shape_type", null, "solid, face, ..."],
+  ["geom_type", null, "line, circle, plane, ..."],
+  ["radius", null, "of a circular edge"],
+  ["normal", null, "of a face"],
+  ["plane", null, "sketch plane on a face"],
+  ["point_at", "point_at(${0.5})", "along an edge, 0 to 1"],
+  ["move_to", "move_to(${0}, ${0})", "sketch: start"],
+  ["line_to", "line_to(${10}, ${0})", "sketch"],
+  ["hline", "hline(${10})", "sketch"],
+  ["vline", "vline(${10})", "sketch"],
+  ["hline_to", "hline_to(${0})", "sketch"],
+  ["vline_to", "vline_to(${0})", "sketch"],
+  ["polar_line", "polar_line(${10}, ${45})", "sketch: length, degrees"],
+  ["arc_to", "arc_to(${5}, ${5}, ${10}, ${0})", "sketch: through, to"],
+  ["close", null, "sketch: closed wire"],
+  ["filter", "filter(|${f}| ${f.area() > 1})", "keep matching shapes"],
+  ["sort_by", "sort_by(|${f}| ${f.center().z})", "order shapes"],
+  ["first", null, "of a selection"],
+  ["last", null, "of a selection"],
+  ["len", null, "of a selection"],
+];
+
+const BUILTINS = new Set([
+  ...CONSTRUCTORS.map(([name]) => name),
+  ...METHODS.map(([name]) => name),
+  "print",
+  "debug",
+]);
 
 export const completions: Completion[] = [
-  ...SHAPES.map(([name, template, detail]) =>
+  ...CONSTRUCTORS.map(([name, template, detail]) =>
     snippetCompletion(template, { label: name, detail, type: "function" }),
   ),
-  ...MATH.map((name) => ({ label: name, type: "function", detail: "math" })),
+  ...METHODS.map(([name, template, detail]) =>
+    snippetCompletion(template ?? `${name}()`, { label: name, detail, type: "method" }),
+  ),
   ...[...KEYWORDS].map((name) => ({ label: name, type: "keyword" })),
 ];
 
