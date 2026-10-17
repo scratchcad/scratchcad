@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/scratchcad/scratchcad/compare/v0.3.0...v0.4.0) (2026-10-17)
+
+
+### Features
+
+* **mcp:** tools and editor for B-rep modelling ([ade897a](https://github.com/scratchcad/scratchcad/commit/ade897a98d3e8bd7afaff75d336c4fade28850e0))
+* **server:** replace Fidget with OpenCASCADE B-rep modelling ([ade897a](https://github.com/scratchcad/scratchcad/commit/ade897a98d3e8bd7afaff75d336c4fade28850e0))
+
+
+### Bug Fixes
+
+* **deps:** bump the cargo-minor-patch group across 1 directory with 3 updates ([#35](https://github.com/scratchcad/scratchcad/issues/35)) ([795417f](https://github.com/scratchcad/scratchcad/commit/795417f51396188bd1cc84924f512c9c28d2dcb7))
+* **deps:** bump the npm-minor-patch group in /mcp with 4 updates ([#34](https://github.com/scratchcad/scratchcad/issues/34)) ([e69880a](https://github.com/scratchcad/scratchcad/commit/e69880a9c8e36d8050cce2e9d7956709b064572f))
+* **deps:** bump the npm-minor-patch group in /mcp with 5 updates ([#31](https://github.com/scratchcad/scratchcad/issues/31)) ([217452f](https://github.com/scratchcad/scratchcad/commit/217452f65feff543ff768e983baf9cb8cc485f48))
+
 ## [0.3.0](https://github.com/Zesuperaker/scratchcad/compare/v0.2.0...v0.3.0) (2026-10-07)
 
 
