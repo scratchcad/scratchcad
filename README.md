@@ -17,7 +17,7 @@ Clone the repo and check out the
 
 <!-- x-release-please-start-version -->
 ```sh
-git clone --branch v0.3.0 https://github.com/scratchcad/scratchcad.git
+git clone --branch v0.4.0 https://github.com/scratchcad/scratchcad.git
 cd scratchcad
 ```
 <!-- x-release-please-end -->
