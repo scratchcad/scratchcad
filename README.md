@@ -12,12 +12,12 @@ build exact B-rep solids, which export to STEP, IGES, BREP, STL, OBJ and 3MF.
 ## Quick start (requires docker)
 
 Clone the repo and check out the
-[latest release](https://github.com/Zesuperaker/scratchcad/releases/latest).
+[latest release](https://github.com/scratchcad/scratchcad/releases/latest).
 `main` moves fast and may be broken between releases.
 
 <!-- x-release-please-start-version -->
 ```sh
-git clone --branch v0.3.0 https://github.com/Zesuperaker/scratchcad.git
+git clone --branch v0.3.0 https://github.com/scratchcad/scratchcad.git
 cd scratchcad
 ```
 <!-- x-release-please-end -->
