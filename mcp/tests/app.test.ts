@@ -10,7 +10,7 @@ import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as appModule from "../src/app.ts";
 import { createApp, errorHandler } from "../src/app.ts";
-import { ScratchcadClient } from "../src/client.ts";
+import { type RawResponse, ScratchcadClient } from "../src/client.ts";
 import { serveEditor } from "../src/editor.ts";
 import { createMcpServer } from "../src/tools.ts";
 import { FakeScratchcad, response, SCRIPT, TOOLS, tempDir, writeFile } from "./helpers.ts";
@@ -338,6 +338,27 @@ describe("scratchcad proxy", () => {
     expect(reply.status).toBe(502);
     expect(reply.json().error).toMatchObject({ code: "unreachable" });
     expect(reply.json().error.message).toContain("could not reach scratchcad");
+  });
+
+  it("drops scratchcad's request when the editor drops its own", async () => {
+    const { base, fake } = await serve();
+    let forwarded: AbortSignal | undefined;
+    // Like nodeSend: no answer until the job ends, and an abort ends it.
+    fake.handler = (_url, { signal }) =>
+      new Promise<RawResponse>((_resolve, reject) => {
+        forwarded = signal;
+        signal!.addEventListener("abort", () => reject(signal!.reason));
+      });
+    const request = http.request(new URL("/api/scratchcad/v1/export/stl", base), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    request.on("error", () => {}); // destroyed below
+    request.end("{}");
+    await vi.waitFor(() => expect(forwarded).toBeDefined());
+    expect(forwarded!.aborted).toBe(false);
+    request.destroy();
+    await vi.waitFor(() => expect(forwarded!.aborted).toBe(true));
   });
 
   it("rejects oversized and malformed JSON in the API's error format", async () => {

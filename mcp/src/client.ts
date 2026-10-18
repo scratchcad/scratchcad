@@ -22,6 +22,8 @@ export interface SendOptions {
   headers: Record<string, string>;
   body: string | Buffer;
   timeoutMs: number;
+  /** Aborting it drops the request and closes its connection. */
+  signal?: AbortSignal;
 }
 
 export type Send = (url: URL, options: SendOptions) => Promise<RawResponse>;
@@ -32,11 +34,12 @@ export class TimeoutError extends Error {
 }
 
 /** POSTs with node:http(s). */
-export const nodeSend: Send = (url, { headers, body, timeoutMs }) =>
+export const nodeSend: Send = (url, { headers, body, timeoutMs, signal }) =>
   new Promise((resolve, reject) => {
     const request = (url.protocol === "https:" ? https : http).request(url, {
       method: "POST",
       headers: { ...headers, "content-length": String(Buffer.byteLength(body)) },
+      signal,
     });
     const timer = setTimeout(
       () => request.destroy(new TimeoutError(`no response within ${timeoutMs} ms`)),
@@ -130,15 +133,17 @@ export class ScratchcadClient {
   /**
    * POSTs a JSON body and returns the response as it came, errors included;
    * the editor's proxy uses this. Throws ScratchcadError only when scratchcad
-   * can't be reached or doesn't answer in time.
+   * can't be reached or doesn't answer in time, or when `signal` aborts the
+   * request, which makes scratchcad stop the job.
    */
-  async forward(path: string, body: string): Promise<RawResponse> {
+  async forward(path: string, body: string, signal?: AbortSignal): Promise<RawResponse> {
     try {
       // Concatenate, so a SCRATCHCAD_URL with a path prefix keeps it.
       return await this.send(new URL(`${this.url}${path}`), {
         headers: this.headers,
         body,
         timeoutMs: this.timeoutS * 1000,
+        signal,
       });
     } catch (error) {
       if (error instanceof TimeoutError) {
