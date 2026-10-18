@@ -86,9 +86,13 @@ the real OCCT; shared helpers are in each crate's `tests/common/mod.rs`.
   handles only through `check_handle` or `handle_try_deref`.
 * After changing dependencies, regenerate `THIRD_PARTY_LICENSES.txt` with `npm run licenses` in
   `mcp/` (needs cargo-about). OpenCASCADE isn't a crate, so its notice is written by that script.
-* The crates are also published on crates.io for use outside scratchcad; the server uses them by
-  path, so it never waits on a release. To publish, publish `scratchcad-occt-sys` before
-  `scratchcad-occt-rhai`, and bump the minor version for breaking changes.
+* The crates are also published on crates.io for use outside scratchcad, with scratchcad's
+  version; the server uses them by path, so it never waits on a release. Don't change their
+  versions by hand: release-please bumps them with scratchcad's (the TOML `extra-files` in
+  `release-please-config.json`, which also update their entries in `Cargo.lock`), and merging its
+  release PR publishes them (`publish-crates` in `.github/workflows/release-please.yml`,
+  `scratchcad-occt-sys` first). If a release PR fails `--locked`, the `Cargo.lock` entry there
+  has stopped matching.
 
 ## Rules that matter
 

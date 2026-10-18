@@ -5,8 +5,8 @@ Write a short script and get a real B-rep solid you can export to STEP, IGES, BR
 
 These crates live in the [`crates/`](https://github.com/scratchcad/scratchcad/tree/main/crates)
 directory of [scratchcad](https://github.com/scratchcad/scratchcad), whose modelling service runs
-on them. Until 2026-10-18 they were developed in
-[scratchcad-occt-rs](https://github.com/scratchcad/scratchcad-occt-rs).
+on them, and are released with it, under the same version number. Until 2026-10-18 they were
+developed in [scratchcad-occt-rs](https://github.com/scratchcad/scratchcad-occt-rs).
 
 ```rhai
 // mounting_plate.rhai
