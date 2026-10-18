@@ -933,7 +933,8 @@ impl Shape {
         Self::from_algorithm(make.pin_mut().Shape()?)
     }
 
-    /// Offsets a planar wire or face within its plane (positive grows it).
+    /// Offsets a planar wire or face within its plane (positive grows it). A face keeps its
+    /// holes; an offset that splits the shape into separate regions is an error.
     pub fn offset_2d(&self, distance: f64) -> Result<Self> {
         require_finite(distance, "offset distance")?;
         let join = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
@@ -958,8 +959,26 @@ impl Shape {
         if !make.IsDone() {
             return Err(Error::OperationFailed("offset"));
         }
-        let wire = Self::from_raw(make.pin_mut().Shape()?)?;
-        Self::face_from(&wire.wires().first()?)
+        // One wire per boundary of the result: the largest bounds the face and the others are
+        // its holes, unless the offset split the face, which leaves wires outside the largest.
+        let mut wires = Self::from_raw(make.pin_mut().Shape()?)?
+            .wires()
+            .iter()
+            .map(|wire| Ok((Self::face_from(wire)?.area()?, wire.clone())))
+            .collect::<Result<Vec<_>>>()?;
+        wires.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let Some(((outer_area, outer), holes)) = wires.split_first() else {
+            return Err(Error::OperationFailed("offset"));
+        };
+        let hole_area: f64 = holes.iter().map(|(area, _)| area).sum();
+        let holes: Vec<Self> = holes.iter().map(|(_, wire)| wire.clone()).collect();
+        let face = Self::face_with_holes(outer, &holes)?;
+        if (face.area()? - (outer_area - hole_area)).abs() > 1e-6 * outer_area {
+            return Err(invalid(format!(
+                "an offset of {distance} splits the shape into separate regions; shrink it by less"
+            )));
+        }
+        Ok(face)
     }
 
     /// Merges coplanar faces and collinear edges left behind by boolean operations.

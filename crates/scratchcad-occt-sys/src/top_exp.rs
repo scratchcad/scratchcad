@@ -75,5 +75,3 @@ mod inner {
         ) -> Result<()>;
     }
 }
-
-unsafe impl Send for inner::TopExp_Explorer {}

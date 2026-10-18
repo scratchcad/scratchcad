@@ -1,7 +1,7 @@
 mod common;
 
 use common::{assert_close, assert_vec_close, cube10, err, err_contains, v};
-use scratchcad_occt_rhai::{ffi, DVec3, Error, Plane, Shape, ShapeType};
+use scratchcad_occt_rhai::{ffi, DVec2, DVec3, Error, Plane, Shape, ShapeType};
 use std::f64::consts::PI;
 
 #[test]
@@ -182,6 +182,36 @@ fn shells_offsets_and_cleanup() {
     assert_close(wire.length().unwrap(), 16.0 + 2.0 * PI, 1e-6);
     let shrunk = square.offset_2d(-1.0).unwrap();
     assert_close(shrunk.length().unwrap(), 8.0, 1e-6);
+    // A face keeps its holes: growing it shrinks a 4 x 4 hole in a 10 x 10 face to 2 x 2, and
+    // shrinking it grows the hole to 6 x 6 with rounded corners.
+    let outer = Shape::rect_on(&Plane::xy(), 10.0, 10.0).unwrap();
+    let holed = Shape::face_with_holes(&outer, std::slice::from_ref(&square)).unwrap();
+    let grown = holed.offset_2d(1.0).unwrap();
+    assert_eq!(grown.wires().len(), 2);
+    assert_close(grown.area().unwrap(), 140.0 + PI - 4.0, 1e-6);
+    let shrunk = holed.offset_2d(-1.0).unwrap();
+    assert_eq!(shrunk.wires().len(), 2);
+    assert_close(shrunk.area().unwrap(), 64.0 - (32.0 + PI), 1e-6);
+    // Two 4 x 4 squares joined by a bar 1 wide come apart when shrunk by more than 0.5.
+    let dumbbell = [
+        (-6.0, -2.0),
+        (-2.0, -2.0),
+        (-2.0, -0.5),
+        (2.0, -0.5),
+        (2.0, -2.0),
+        (6.0, -2.0),
+        (6.0, 2.0),
+        (2.0, 2.0),
+        (2.0, 0.5),
+        (-2.0, 0.5),
+        (-2.0, 2.0),
+        (-6.0, 2.0),
+    ]
+    .map(|(x, y)| DVec2::new(x, y));
+    let dumbbell = Shape::polygon_on(&Plane::xy(), &dumbbell).unwrap();
+    err_contains(dumbbell.offset_2d(-0.75), "splits the shape into separate regions");
+    err_contains(Shape::face_from(&dumbbell).unwrap().offset_2d(-0.75), "separate regions");
+    assert_eq!(dumbbell.offset_2d(-0.25).unwrap().shape_type(), ShapeType::Wire);
     err_contains(cube.offset_2d(1.0), "expected wire or face, got solid");
     err_contains(square.offset_2d(f64::NAN), "offset distance");
 

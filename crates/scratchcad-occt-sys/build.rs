@@ -101,6 +101,9 @@ impl OcctConfig {
     /// Find OpenCASCADE library using cmake
     fn detect() -> Self {
         println!("cargo:rerun-if-env-changed=DEP_OCCT_ROOT");
+        // The CMake project in OCCT/ finds OpenCASCADE, also searching CMAKE_PREFIX_PATH.
+        println!("cargo:rerun-if-changed=OCCT");
+        println!("cargo:rerun-if-env-changed=CMAKE_PREFIX_PATH");
 
         // Add path to builtin OCCT
         #[cfg(feature = "builtin")]

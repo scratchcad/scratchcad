@@ -89,5 +89,3 @@ mod inner {
         pub fn IsDone(self: &BRepFilletAPI_MakeChamfer) -> bool;
     }
 }
-
-unsafe impl Send for inner::BRepFilletAPI_MakeChamfer {}

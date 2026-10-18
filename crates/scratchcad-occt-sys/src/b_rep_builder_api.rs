@@ -162,5 +162,3 @@ mod inner {
         pub fn BRepBuilderAPI_copy_shape(shape: &TopoDS_Shape) -> Result<UniquePtr<TopoDS_Shape>>;
     }
 }
-
-unsafe impl Send for inner::BRepBuilderAPI_MakeWire {}

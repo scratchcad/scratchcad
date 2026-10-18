@@ -130,11 +130,7 @@ mod inner {
     }
 }
 
-unsafe impl Send for inner::TopoDS_Vertex {}
-unsafe impl Send for inner::TopoDS_Edge {}
-unsafe impl Send for inner::TopoDS_Wire {}
-unsafe impl Send for inner::TopoDS_Face {}
-unsafe impl Send for inner::TopoDS_Shell {}
-unsafe impl Send for inner::TopoDS_Solid {}
-unsafe impl Send for inner::TopoDS_Compound {}
-unsafe impl Send for inner::TopoDS_Shape {}
+// The shapes are not `Send`: a copied `TopoDS_Shape` shares its sub-shapes with the original, and
+// OpenCASCADE's algorithms modify sub-shapes in place, so two threads holding copies would race.
+// The same goes for every type that holds shapes. To move a shape to another thread, deep-copy it
+// first (`BRepBuilderAPI_copy_shape`), as scratchcad-occt-rhai's `DetachedShape` does.
