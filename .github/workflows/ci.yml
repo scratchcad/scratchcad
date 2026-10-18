@@ -12,40 +12,43 @@ env:
 jobs:
   check:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: server
-      # The prebuilt OpenCASCADE from conda-forge, which scratchcad-occt-rhai
+      # The prebuilt OpenCASCADE from conda-forge, which scratchcad-occt-sys
       # links by default.
       - uses: ./.github/actions/install-occt
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --locked
-      - run: cargo test --locked
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo test --workspace --locked
+
+  # The crates' C++ headers, with the clang-format version their style was set with.
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jidicula/clang-format-action@v4.18.0
+        with:
+          clang-format-version: "14"
+          check-path: crates/scratchcad-occt-sys/include
 
   coverage:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: server
       - uses: ./.github/actions/install-occt
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --locked --fail-under-lines 90 --summary-only
+      - run: cargo llvm-cov --locked -p scratchcad --fail-under-lines 90 --summary-only
+      - run: >
+          cargo llvm-cov --locked -p scratchcad-occt-rhai -p scratchcad-occt-sys
+          --fail-under-lines 95 --summary-only --show-missing-lines
 
   mcp:
     runs-on: ubuntu-latest
@@ -54,18 +57,16 @@ jobs:
         working-directory: mcp
     env:
       # The integration tests run the MCP server against this real binary.
-      SCRATCHCAD_BIN: ${{ github.workspace }}/server/target/release/scratchcad
+      SCRATCHCAD_BIN: ${{ github.workspace }}/target/release/scratchcad
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: server
       # The binary links OpenCASCADE dynamically, so the integration tests
       # need LD_LIBRARY_PATH, which this also sets.
       - uses: ./.github/actions/install-occt
-      - run: cargo build --release --locked
-        working-directory: server
+      - run: cargo build --release --locked -p scratchcad
+        working-directory: .
       - uses: actions/setup-node@v7
         with:
           node-version: 24

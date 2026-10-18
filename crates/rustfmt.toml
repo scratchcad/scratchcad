@@ -1,0 +1,7 @@
+# Modified by Joaquim Dalton-Pereira, 2026-10-13. Based on opencascade-rs
+# (https://github.com/bschwind/opencascade-rs); later changes are in the git history.
+
+use_small_heuristics="Max"
+match_block_trailing_comma = true
+use_field_init_shorthand = true
+use_try_shorthand = true

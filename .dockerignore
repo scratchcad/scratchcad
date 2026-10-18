@@ -1,0 +1,11 @@
+# The server images build from the repo root (compose.yaml, server/Dockerfile),
+# since the server needs crates/. Send only the Rust workspace. The mcp image
+# builds from mcp/ and uses mcp/.dockerignore.
+*
+!Cargo.toml
+!Cargo.lock
+!server/Cargo.toml
+!server/src
+!crates
+crates/*/tests
+crates/*/examples

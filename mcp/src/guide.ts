@@ -1,5 +1,5 @@
 // The server's MCP instructions: how to write scripts and use the tools.
-// The scripting API is scratchcad-occt-rhai's; see its docs/rhai-api.md.
+// The scripting API is scratchcad-occt-rhai's; see crates/scratchcad-occt-rhai/docs/rhai-api.md.
 
 /** The guide's example scripts; the integration tests run them. */
 export const EXAMPLES = {

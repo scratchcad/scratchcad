@@ -19,6 +19,26 @@
           "type": "json",
           "path": "mcp/package-lock.json",
           "jsonpath": "$.packages[''].version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/scratchcad-occt-sys/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/scratchcad-occt-rhai/Cargo.toml",
+          "jsonpath": "$.package.version"
+        },
+        {
+          "type": "toml",
+          "path": "crates/scratchcad-occt-rhai/Cargo.toml",
+          "jsonpath": "$.dependencies['scratchcad-occt-sys'].version"
+        },
+        {
+          "type": "toml",
+          "path": "Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value == 'scratchcad-occt-sys' || @.name.value == 'scratchcad-occt-rhai')].version"
         }
       ]
     }

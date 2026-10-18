@@ -1,5 +1,5 @@
 //! HTTP API over [OpenCASCADE](https://dev.opencascade.org) through
-//! [scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs):
+//! [scratchcad-occt-rhai](scratchcad_occt_rhai) (in `crates/`):
 //! run Rhai scripts that build B-rep solids, measure them, render them to PNG
 //! and export them as STEP, IGES, BREP, STL, OBJ or 3MF.
 //!

@@ -13,8 +13,11 @@ name: release-please
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
     steps:
       - uses: googleapis/release-please-action@v5.0.0
+        id: release
         with:
           # this assumes that you have created a personal access token
           # (PAT) and configured it as a GitHub action secret named
@@ -22,3 +25,42 @@ jobs:
           token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
           # release type and extra files are set in release-please-config.json,
           # and the current version in .release-please-manifest.json
+
+  # Publishes the crates in crates/ to crates.io when merging the release PR
+  # creates a release. release-please has already given them scratchcad's
+  # version (see the extra files in release-please-config.json). This logs in
+  # with crates.io's trusted publishing, so no token is stored: each crate's
+  # settings on crates.io must trust this workflow (repository
+  # scratchcad/scratchcad, workflow release-please.yml, environment crates-io).
+  publish-crates:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # cargo publish builds each crate before uploading it, and
+      # scratchcad-occt-sys links OpenCASCADE.
+      - uses: ./.github/actions/install-occt
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      # scratchcad-occt-rhai depends on scratchcad-occt-sys, so that goes first.
+      # A version already on crates.io is skipped, so a failed run can be re-run.
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          for crate in scratchcad-occt-sys scratchcad-occt-rhai; do
+            version=$(cargo metadata --format-version 1 --no-deps \
+              | jq -r --arg crate "$crate" '.packages[] | select(.name == $crate) | .version')
+            if curl -fs -o /dev/null -A "scratchcad release workflow (https://github.com/scratchcad/scratchcad)" \
+                "https://crates.io/api/v1/crates/$crate/$version"; then
+              echo "$crate $version is already on crates.io"
+            else
+              cargo publish -p "$crate"
+            fi
+          done

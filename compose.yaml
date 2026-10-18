@@ -24,8 +24,9 @@ name: scratchcad
 services:
   server:
     build:
-      context: ./server
-      dockerfile: Dockerfile.dev
+      # The repo root, so the build sees the crates in crates/ (see .dockerignore).
+      context: .
+      dockerfile: server/Dockerfile.dev
     ports:
       - "127.0.0.1:8080:8080"
     env_file: &env
@@ -37,11 +38,18 @@ services:
     develop:
       watch:
         - path: ./server/src
-          target: /app/src
+          target: /app/server/src
           action: sync+restart
         - path: ./server/Cargo.toml
           action: rebuild
-        - path: ./server/Cargo.lock
+        - path: ./crates
+          action: rebuild
+          ignore:
+            - "*/tests/"
+            - "*/examples/"
+        - path: ./Cargo.toml
+          action: rebuild
+        - path: ./Cargo.lock
           action: rebuild
 
   mcp:

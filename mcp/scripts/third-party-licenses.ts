@@ -1,4 +1,4 @@
-// Regenerates THIRD_PARTY_LICENSES.txt after dependency changes.
+// Regenerates THIRD_PARTY_NOTICES.txt after dependency changes.
 //
 //     cargo install --locked cargo-about --features cli   # once
 //     npm run licenses                                    # in mcp/
@@ -17,7 +17,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
-const OUTPUT = join(ROOT, "THIRD_PARTY_LICENSES.txt");
+const OUTPUT = join(ROOT, "THIRD_PARTY_NOTICES.txt");
 const RULE = "#".repeat(80);
 
 interface PackageJson {

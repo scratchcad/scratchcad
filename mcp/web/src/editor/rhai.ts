@@ -1,5 +1,5 @@
 // Rhai syntax highlighting and completions for the modelling functions that
-// scratchcad-occt-rhai registers (see its docs/rhai-api.md).
+// scratchcad-occt-rhai registers (see crates/scratchcad-occt-rhai/docs/rhai-api.md).
 import { type Completion, snippetCompletion } from "@codemirror/autocomplete";
 import {
   HighlightStyle,

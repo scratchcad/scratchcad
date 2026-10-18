@@ -1,6 +1,6 @@
 //! Sandboxed Rhai execution.
 //!
-//! Scripts use [scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs)'s
+//! Scripts use [scratchcad-occt-rhai](scratchcad_occt_rhai)'s
 //! bindings to OpenCASCADE and produce a shape either by calling `draw(shape)`
 //! exactly once or by evaluating to a shape as their final expression.  The
 //! result is a B-rep [`Shape`]; nothing is retained between requests.
