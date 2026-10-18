@@ -245,7 +245,7 @@ The tests cover three layers:
 
 ## Licence
 
-scratchcad is Apache-2.0. It links scratchcad-occt-rhai and OpenCASCADE,
-which are LGPL-2.1 (OpenCASCADE with an exception); see
-[`../THIRD_PARTY_LICENSES.txt`](../THIRD_PARTY_LICENSES.txt) and
+scratchcad is Apache-2.0. It links the crates in [`../crates`](../crates) and
+OpenCASCADE, which are LGPL-2.1 (OpenCASCADE with an exception); see
+[`../THIRD_PARTY_NOTICES.txt`](../THIRD_PARTY_NOTICES.txt) and
 [`../NOTICE`](../NOTICE).

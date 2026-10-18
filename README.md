@@ -127,7 +127,7 @@ scratchcad is licensed under the [Apache License 2.0](LICENSE), except for the c
 [LGPL 2.1 only](crates/scratchcad-occt-sys/LICENSE): each has its own `LICENSE` and `NOTICE`.
 Contributions to `crates/` are under the LGPL 2.1, and everything else under the Apache License
 2.0. Its dependencies are listed with their licenses in
-[`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).
+[`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt).
 
 scratchcad makes use of [Open CASCADE Technology](https://dev.opencascade.org), which is
 licensed under the LGPL 2.1 with the Open CASCADE exception, through those crates. Until

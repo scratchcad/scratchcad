@@ -1,5 +1,5 @@
 # Configuration for `cargo about`, which generates the Rust section of
-# ../THIRD_PARTY_LICENSES.txt; see ../mcp/scripts/third-party-licenses.ts.
+# ../THIRD_PARTY_NOTICES.txt; see ../mcp/scripts/third-party-licenses.ts.
 # Generation fails if a dependency uses a license not listed here, so a new
 # license (e.g. GPL) gets a deliberate review before it ships.
 #
@@ -30,3 +30,8 @@ targets = [
     "aarch64-apple-darwin",
 ]
 ignore-dev-dependencies = true
+
+# Leave out scratchcad itself: the binary is the workspace's one crate with
+# `publish = false`, and it isn't third-party software.
+[private]
+ignore = true
