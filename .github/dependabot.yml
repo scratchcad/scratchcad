@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: /server
+    directory: /
     schedule:
       interval: weekly
     commit-message:
@@ -11,6 +11,9 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
+        # A new OpenCASCADE release can change the C++ API scratchcad-occt-sys
+        # wraps, so it gets a pull request of its own.
+        exclude-patterns: [occt-sys]
 
   - package-ecosystem: npm
     directory: /mcp

@@ -179,7 +179,7 @@ port as in production. The same checks run in the dev container:
 | `tests/`      | Server tests: unit tests with a fake scratchcad, the HTTP app over real HTTP, and integration tests |
 
 The integration tests run against a real scratchcad binary, from
-`$SCRATCHCAD_BIN` or `../server/target/{release,debug}/scratchcad`, and are
+`$SCRATCHCAD_BIN` or `../target/{release,debug}/scratchcad`, and are
 skipped when none has been built (CI builds one). The binary links
 OpenCASCADE dynamically, so `LD_LIBRARY_PATH` must find it (see
 [`../server/README.md`](../server/README.md)). They run the scripting guide's

@@ -1,0 +1,13 @@
+scratchcad-occt-sys and scratchcad-occt-rhai
+Copyright (C) 2026 Joaquim Dalton-Pereira
+
+Based on opencascade-rs (https://github.com/bschwind/opencascade-rs)
+Copyright (C) 2022-2026 Brian Schwind and the opencascade-rs contributors
+
+Licensed under the GNU Lesser General Public License version 2.1 only. See LICENSE.
+Files changed from opencascade-rs say so in a comment at the top.
+
+Until 2026-10-18 these crates were developed in
+https://github.com/scratchcad/scratchcad-occt-rs, whose git history records
+the changes made before then. Later changes are in the git history of
+https://github.com/scratchcad/scratchcad, where they live under crates/.

@@ -7,7 +7,7 @@
 # opt-level 0. OpenCASCADE itself is Debian's prebuilt library.
 # For the production image, see Dockerfile.
 
-# Keep the Rust version in step with `rust-version` in Cargo.toml.
+# Keep the Rust version in step with `rust-version` in server/Cargo.toml.
 FROM rust:1.99-trixie
 
 # scratchcad-occt-rhai links the system's OpenCASCADE 7.8, which Debian 13
@@ -32,20 +32,24 @@ ENV CARGO_TARGET_DIR=/target \
 RUN printf '[profile.dev]\nopt-level = 2\n\n[profile.dev.package."*"]\nopt-level = 3\n' \
       >> "$CARGO_HOME/config.toml"
 
-# Build dependencies first so they are cached independently of our sources.
+# The build context is the repo root (see ../.dockerignore). Build the
+# dependencies, including the crates in crates/, first so they are cached
+# independently of the server's sources.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src \
- && echo 'fn main() {}' > src/main.rs \
- && touch src/lib.rs \
- && cargo build --locked \
- && rm -rf src
+COPY crates ./crates
+COPY server/Cargo.toml ./server/
+RUN mkdir server/src \
+ && echo 'fn main() {}' > server/src/main.rs \
+ && touch server/src/lib.rs \
+ && cargo build --locked -p scratchcad \
+ && rm -rf server/src
 
-COPY src ./src
-RUN touch src/main.rs src/lib.rs && cargo build --locked
+COPY server/src ./server/src
+RUN touch server/src/main.rs server/src/lib.rs && cargo build --locked -p scratchcad
 
 EXPOSE 8080
 HEALTHCHECK --interval=5s --timeout=3s --start-period=300s --retries=5 \
   CMD ["curl", "-fsS", "http://127.0.0.1:8080/readyz"]
 # `cargo run` recompiles on start, so a restart after a source change (which
 # `docker compose watch` does automatically) picks up the new code.
-CMD ["cargo", "run", "--locked"]
+CMD ["cargo", "run", "--locked", "-p", "scratchcad"]

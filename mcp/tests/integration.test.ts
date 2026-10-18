@@ -2,8 +2,8 @@
 // entry point as a process over stdio and HTTP.
 //
 // The scratchcad tests use the binary at $SCRATCHCAD_BIN when it is set (and
-// fail if it is missing). Otherwise they look in ../server/target and are
-// skipped when it hasn't been built.
+// fail if it is missing). Otherwise they look in the Cargo workspace's
+// ../target and are skipped when it hasn't been built.
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -39,7 +39,7 @@ function findScratchcad(): string | null {
     return explicit;
   }
   for (const kind of ["release", "debug"]) {
-    const candidate = path.join(MCP_DIR, "..", "server", "target", kind, "scratchcad");
+    const candidate = path.join(MCP_DIR, "..", "target", kind, "scratchcad");
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;

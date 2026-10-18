@@ -1,0 +1,26 @@
+# Modified by Joaquim Dalton-Pereira, 2026-10-13. Based on opencascade-rs
+# (https://github.com/bschwind/opencascade-rs); later changes are in the git history.
+
+[package]
+name = "scratchcad-occt-sys"
+description = "Rust bindings to the OpenCascade CAD Kernel, with C++ exception handling"
+license = "LGPL-2.1-only"
+version = "0.2.0"
+edition = "2021"
+repository = "https://github.com/scratchcad/scratchcad"
+readme = "README.md"
+keywords = ["cad", "opencascade", "occt", "ffi", "bindings"]
+categories = ["external-ffi-bindings", "graphics", "science"]
+
+[dependencies]
+cxx = "1"
+
+[build-dependencies]
+cmake = "0.1"
+cxx-build = "1"
+occt-sys = { version = "=7.8.1", optional = true }
+
+[features]
+# Build OpenCASCADE from source (via `occt-sys`, about 20 minutes) instead of linking an installed
+# OpenCASCADE 7.8, which is the default; see the README.
+builtin = ["occt-sys"]

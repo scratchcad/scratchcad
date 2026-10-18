@@ -1,0 +1,19 @@
+[workspace]
+members = ["server", "crates/scratchcad-occt-sys", "crates/scratchcad-occt-rhai"]
+resolver = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Keep unwinding so a panic inside a job is contained to one request.
+panic = "unwind"
+overflow-checks = true
+
+# With the `builtin` feature, `occt-sys` compiles OpenCASCADE into static libraries that end up in
+# the binaries. Optimize it in every profile so tests using it run at a reasonable speed.
+[profile.dev.package.occt-sys]
+opt-level = 3
+debug = false
+
+[profile.release.package.occt-sys]
+opt-level = 3

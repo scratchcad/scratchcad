@@ -8,7 +8,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-scratchcad-occt-rhai = "=0.2.0"
+scratchcad-occt-rhai = { path = "../crates/scratchcad-occt-rhai" }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # 3MF packages are ZIP archives of deflated XML
 flate2 = "1.1.10"
@@ -34,9 +34,3 @@ rustix = { version = "1.1.5", features = ["process", "stdio"] }
 http-body-util = "0.1.5"
 tower = { version = "0.5.3", features = ["util"] }
 
-[profile.release]
-lto = "thin"
-codegen-units = 1
-# Keep unwinding so a panic inside a job is contained to one request.
-panic = "unwind"
-overflow-checks = true

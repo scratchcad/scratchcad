@@ -109,23 +109,31 @@ to keep.
 
 | directory | what it is | where it runs |
 |---|---|---|
-| [`server/`](server) | The scratchcad HTTP service (Rust 1.99, [OpenCASCADE](https://dev.opencascade.org) through [scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs), and axum). Runs [Rhai](https://rhai.rs) scripts that build B-rep solids, then measures, renders and exports them. It is stateless and never touches your files. | anywhere: locally in Docker, or on another machine |
+| [`server/`](server) | The scratchcad HTTP service (Rust 1.99, [OpenCASCADE](https://dev.opencascade.org) through the crates in [`crates/`](crates), and axum). Runs [Rhai](https://rhai.rs) scripts that build B-rep solids, then measures, renders and exports them. It is stateless and never touches your files. | anywhere: locally in Docker, or on another machine |
 | [`mcp/`](mcp) | The MCP server and editor (TypeScript, [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk), [React](https://react.dev), [Vite](https://vite.dev), [CodeMirror](https://codemirror.net), [three.js](https://threejs.org)). Gives a model tools to write a script, look at renders, measure the part, save it and export it, and gives you an editor with a live 3D preview, parameter sliders and export to every format. | always on your machine, next to the files it reads and writes |
+| [`crates/`](crates) | The Rust crates that script OpenCASCADE: [`scratchcad-occt-rhai`](crates/scratchcad-occt-rhai), the [Rhai](https://rhai.rs) API scripts call (see its [reference](crates/scratchcad-occt-rhai/docs/rhai-api.md)), and [`scratchcad-occt-sys`](crates/scratchcad-occt-sys), the C++ bindings under it. Licensed under the LGPL 2.1, and also published on crates.io for use outside scratchcad. | inside the scratchcad service |
 
-The two talk over HTTP: the MCP server reaches scratchcad at `SCRATCHCAD_URL`,
-so it works with a local build, the dev container, or a deployed instance
-(see [`mcp/README.md`](mcp/README.md) for running it on its own). The editor
-only talks to the MCP server, which forwards its requests to scratchcad and
-adds the API token, so the token never reaches the browser.
+The service and the MCP server talk over HTTP: the MCP server reaches
+scratchcad at `SCRATCHCAD_URL`, so it works with a local build, the dev
+container, or a deployed instance (see [`mcp/README.md`](mcp/README.md) for
+running it on its own). The editor only talks to the MCP server, which
+forwards its requests to scratchcad and adds the API token, so the token
+never reaches the browser.
 
 ## License
 
-scratchcad is licensed under the [Apache License 2.0](LICENSE). Its dependencies are listed
-with their licenses in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).
+scratchcad is licensed under the [Apache License 2.0](LICENSE), except for the crates in
+[`crates/`](crates), which are licensed under the
+[LGPL 2.1 only](crates/scratchcad-occt-sys/LICENSE): each has its own `LICENSE` and `NOTICE`.
+Contributions to `crates/` are under the LGPL 2.1, and everything else under the Apache License
+2.0. Its dependencies are listed with their licenses in
+[`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt).
 
 scratchcad makes use of [Open CASCADE Technology](https://dev.opencascade.org), which is
-licensed under the LGPL 2.1 with the Open CASCADE exception, through
-[scratchcad-occt-rs](https://github.com/scratchcad/scratchcad-occt-rs) (LGPL 2.1).
+licensed under the LGPL 2.1 with the Open CASCADE exception, through those crates. Until
+2026-10-18 they were developed in
+[scratchcad-occt-rs](https://github.com/scratchcad/scratchcad-occt-rs), whose history has their
+earlier changes.
 
 ## Shoutout
 

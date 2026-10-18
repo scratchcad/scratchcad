@@ -2802,7 +2802,7 @@ Used by:
   - crypto-common 0.2.2 (https://github.com/RustCrypto/traits)
   - digest 0.11.3 (https://github.com/RustCrypto/traits)
   - hybrid-array 0.4.15 (https://github.com/RustCrypto/hybrid-array)
-  - sha2 0.11.0 (https://github.com/RustCrypto/hashes)
+  - sha2 0.11.1 (https://github.com/RustCrypto/hashes)
 --------------------------------------------------------------------------------
                               Apache License
                         Version 2.0, January 2004
@@ -3726,7 +3726,7 @@ Used by:
   - serde 1.0.229 (https://github.com/serde-rs/serde)
   - serde_core 1.0.229 (https://github.com/serde-rs/serde)
   - serde_derive 1.0.229 (https://github.com/serde-rs/serde)
-  - serde_json 1.0.151 (https://github.com/serde-rs/json)
+  - serde_json 1.0.154 (https://github.com/serde-rs/json)
   - serde_path_to_error 0.1.20 (https://github.com/dtolnay/path-to-error)
   - shlex 2.0.1 (https://github.com/comex/rust-shlex)
   - syn 2.0.119 (https://github.com/dtolnay/syn)
@@ -3980,8 +3980,8 @@ express Statement of Purpose.
 ================================================================================
 GNU Lesser General Public License v2.1 only
 Used by:
-  - scratchcad-occt-rhai 0.2.0 (https://github.com/scratchcad/scratchcad-occt-rs)
-  - scratchcad-occt-sys 0.2.0 (https://github.com/scratchcad/scratchcad-occt-rs)
+  - scratchcad-occt-rhai 0.2.0 (https://github.com/scratchcad/scratchcad)
+  - scratchcad-occt-sys 0.2.0 (https://github.com/scratchcad/scratchcad)
 --------------------------------------------------------------------------------
 GNU LESSER GENERAL PUBLIC LICENSE
 
@@ -4663,7 +4663,7 @@ SOFTWARE.
 MIT License
 Used by:
   - tokio-util 0.7.19 (https://github.com/tokio-rs/tokio)
-  - tokio 1.53.2 (https://github.com/tokio-rs/tokio)
+  - tokio 1.53.3 (https://github.com/tokio-rs/tokio)
 --------------------------------------------------------------------------------
 MIT License
 
@@ -8506,7 +8506,7 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 zod
-4.6.5
+4.6.6
 MIT
 https://zod.dev
 MIT License

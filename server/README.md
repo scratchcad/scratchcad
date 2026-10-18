@@ -2,7 +2,7 @@
 
 A lean HTTP service that models solid parts with
 [OpenCASCADE](https://dev.opencascade.org) 7.8, through
-[scratchcad-occt-rhai](https://github.com/scratchcad/scratchcad-occt-rs), and
+[scratchcad-occt-rhai](../crates/scratchcad-occt-rhai) (in [`../crates`](../crates)), and
 [axum](https://github.com/tokio-rs/axum). You send it [Rhai](https://rhai.rs)
 scripts that build B-rep solids, and it can:
 
@@ -11,13 +11,15 @@ scripts that build B-rep solids, and it can:
 - **export** STEP, IGES, BREP, STL, OBJ or 3MF: `POST /v1/export/{format}`
 
 To drive it from an AI assistant, see the MCP server in [`../mcp`](../mcp).
-Run the commands below from this `server/` directory. For a containerised
-dev setup with live reload, use `docker compose watch` from the repo root
-(see [`Dockerfile.dev`](Dockerfile.dev)).
+Run the commands below from this `server/` directory; it is a member of the
+Cargo workspace at the repo root, so builds go to `../target`. The Docker
+images build from the repo root, which holds the crates too. For a
+containerised dev setup with live reload, use `docker compose watch` from the
+repo root (see [`Dockerfile.dev`](Dockerfile.dev)).
 
 ```sh
 cargo run --release                       # listens on 0.0.0.0:8080
-docker build -t scratchcad . && docker run -p 8080:8080 -e SCRATCHCAD_API_TOKEN=... scratchcad
+docker build -t scratchcad -f Dockerfile .. && docker run -p 8080:8080 -e SCRATCHCAD_API_TOKEN=... scratchcad
 ```
 
 Building needs Rust 1.99, CMake, a C++ compiler and OpenCASCADE 7.8, which
@@ -41,7 +43,7 @@ Scripts use scratchcad-occt-rhai's functions: constructors such as
 and `&`, methods such as `fillet`, `chamfer`, `shell`, `extrude` and
 `revolve`, and CadQuery-style selectors (`">Z"`, `"|Z and >X"`) to pick
 faces and edges. See its
-[Rhai API reference](https://github.com/scratchcad/scratchcad-occt-rs/blob/main/docs/rhai-api.md).
+[Rhai API reference](../crates/scratchcad-occt-rhai/docs/rhai-api.md).
 Z is up and units are millimetres. A script produces its shape in one of two
 ways:
 

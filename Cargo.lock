@@ -425,6 +425,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastrand"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -828,6 +834,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "occt-sys"
+version = "7.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d2199ccf5331d261cf293abbc6b6b6ca1eb7187ef2113c181c49f9365cd9ae"
+dependencies = [
+ "cmake",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1005,25 +1020,23 @@ dependencies = [
 [[package]]
 name = "scratchcad-occt-rhai"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8510c46ec1341b7db58b38b7c666880bf5f067bf896632ba31e1ea9274fb2c51"
 dependencies = [
  "cxx",
  "glam",
  "rhai",
  "scratchcad-occt-sys",
+ "tempfile",
  "thiserror",
 ]
 
 [[package]]
 name = "scratchcad-occt-sys"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "174d1fac4c7e3cdb3fc25bcc33645df79509d4b9c030b11db6d7f668023bc83b"
 dependencies = [
  "cmake",
  "cxx",
  "cxx-build",
+ "occt-sys",
 ]
 
 [[package]]
@@ -1194,6 +1207,19 @@ name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix",
+ "windows-sys",
+]
 
 [[package]]
 name = "termcolor"

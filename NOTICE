@@ -8,3 +8,10 @@ This product makes use of facilities provided by the Open CASCADE
 Technology software (https://dev.opencascade.org), which is licensed under
 the GNU Lesser General Public License version 2.1 with the Open CASCADE
 exception; see THIRD_PARTY_LICENSES.txt.
+
+The crates in crates/ (scratchcad-occt-sys and scratchcad-occt-rhai) are not
+licensed under the Apache License 2.0: they are licensed under the GNU Lesser
+General Public License version 2.1 only, and are based in part on
+opencascade-rs (https://github.com/bschwind/opencascade-rs), Copyright (C)
+2022-2026 Brian Schwind and the opencascade-rs contributors. See the LICENSE
+and NOTICE files in each crate.
