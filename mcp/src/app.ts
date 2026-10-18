@@ -207,8 +207,17 @@ export function createApp({
     if (!PROXIED.includes(endpoint)) {
       return fail(res, 404, "not_found", `no scratchcad endpoint ${endpoint}`);
     }
+    // The editor drops a preview's requests when the script changes. Drop the
+    // request to scratchcad with it, so that it kills the job's worker and
+    // frees its slot rather than finishing a result nobody will read.
+    const controller = new AbortController();
+    res.on("close", () => controller.abort());
     try {
-      const response = await client.forward(endpoint, JSON.stringify(req.body ?? {}));
+      const response = await client.forward(
+        endpoint,
+        JSON.stringify(req.body ?? {}),
+        controller.signal,
+      );
       res.status(response.status);
       for (const name of FORWARDED_HEADERS) {
         const value = response.headers[name]?.[0];
@@ -225,6 +234,8 @@ export function createApp({
       }
       res.end(response.body);
     } catch (error) {
+      // Nobody is waiting for an answer.
+      if (controller.signal.aborted) return;
       // forward() only throws when scratchcad can't be reached in time.
       fail(res, 502, "unreachable", (error as ScratchcadError).message);
     }

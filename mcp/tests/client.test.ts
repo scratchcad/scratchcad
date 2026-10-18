@@ -218,6 +218,13 @@ describe("ScratchcadClient", () => {
     expect(raw.status).toBe(422);
     expect(fake.last.options.body).toBe('{"script":"x"}');
   });
+
+  it("passes a signal on to the request", async () => {
+    const fake = new FakeScratchcad();
+    const { signal } = new AbortController();
+    await api(fake).forward("/v1/scripts/validate", "{}", signal);
+    expect(fake.last.options.signal).toBe(signal);
+  });
 });
 
 describe("nodeSend", () => {
@@ -264,6 +271,30 @@ describe("nodeSend", () => {
     await expect(nodeSend(url, { headers: {}, body: "", timeoutMs: 50 })).rejects.toBeInstanceOf(
       TimeoutError,
     );
+  });
+
+  it("drops the request, and closes its connection, when the signal aborts", async () => {
+    let received!: () => void;
+    let closed!: () => void;
+    const arrived = new Promise<void>((resolve) => (received = resolve));
+    const gone = new Promise<void>((resolve) => (closed = resolve));
+    const url = await serve((req, res) => {
+      // Never answers, like a job that is still running
+      req.resume();
+      res.on("close", closed);
+      received();
+    });
+    const controller = new AbortController();
+    const sent = nodeSend(url, {
+      headers: {},
+      body: "",
+      timeoutMs: 5000,
+      signal: controller.signal,
+    });
+    await arrived;
+    controller.abort();
+    await expect(sent).rejects.toMatchObject({ name: "AbortError" });
+    await gone;
   });
 
   it("fails when nothing listens, or TLS is spoken to plain HTTP", async () => {
