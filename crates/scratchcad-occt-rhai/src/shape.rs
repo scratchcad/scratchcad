@@ -1069,9 +1069,9 @@ impl Shape {
     /// number of Gauss points: exact for analytic faces, but off by percent on lofts, sweeps and
     /// extruded splines, whose faces have many spans. On a single Bézier patch the same
     /// integration is accurate, to about 1e-7. (Its adaptive integrations report a tiny error on
-    /// such faces while getting them wrong, and can take minutes.) Falls back to the shape
-    /// itself if the conversion fails.
-    fn for_measuring(&self) -> Self {
+    /// such faces while getting them wrong, and can take minutes.) Fails if the conversion
+    /// does, rather than measuring the shape wrong.
+    fn for_measuring(&self) -> Result<Self> {
         let free_form = |s: &Shape| {
             // Degenerate edges, at the poles of a sphere, have no curve and need nothing.
             matches!(
@@ -1080,28 +1080,25 @@ impl Shape {
             )
         };
         if !self.faces().iter().any(free_form) && !self.edges().iter().any(free_form) {
-            return self.clone();
+            return Ok(self.clone());
         }
-        ffi::shape_upgrade::ShapeUpgrade_convert_to_bezier(self.raw())
-            .ok()
-            .and_then(|copy| Self::from_unique(copy).ok())
-            .unwrap_or_else(|| self.clone())
+        Self::from_unique(ffi::shape_upgrade::ShapeUpgrade_convert_to_bezier(self.raw())?)
     }
 
     /// The enclosed volume (0 for shapes without solids).
     pub fn volume(&self) -> Result<f64> {
-        Ok(self.for_measuring().volume_props()?.Mass().abs())
+        Ok(self.for_measuring()?.volume_props()?.Mass().abs())
     }
 
     /// The total area of all faces.
     pub fn area(&self) -> Result<f64> {
-        Ok(self.for_measuring().surface_props()?.Mass())
+        Ok(self.for_measuring()?.surface_props()?.Mass())
     }
 
     /// The volume, area and center of mass together, which splits the shape for measuring
     /// once instead of three times.
     pub fn mass_properties(&self) -> Result<MassProperties> {
-        let exact = self.for_measuring();
+        let exact = self.for_measuring()?;
         Ok(MassProperties {
             volume: exact.volume_props()?.Mass().abs(),
             area: exact.surface_props()?.Mass(),
@@ -1117,7 +1114,7 @@ impl Shape {
     /// The center of mass, using the highest-dimensional content of the shape: volume for
     /// solids, area for faces and shells, length for edges and wires.
     pub fn center(&self) -> Result<DVec3> {
-        self.for_measuring().center_of_mass()
+        self.for_measuring()?.center_of_mass()
     }
 
     fn center_of_mass(&self) -> Result<DVec3> {
