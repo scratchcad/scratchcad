@@ -96,3 +96,7 @@ licensed under the LGPL 2.1 with the Open CASCADE exception, through those crate
 2026-10-18 they were developed in
 [scratchcad-occt-rs](https://github.com/scratchcad/scratchcad-occt-rs), whose history has their
 earlier changes.
+
+## If you've found scratchcad useful please leave a star
+
+
