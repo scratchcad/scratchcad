@@ -92,7 +92,7 @@ claude mcp add scratchcad -e SCRATCHCAD_MCP_OUTPUT_DIR="$PWD/output" -- node "$P
 | ------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `SCRATCHCAD_URL`               | `http://127.0.0.1:8080` | where the scratchcad service is listening; may include a path prefix                                                          |
 | `SCRATCHCAD_API_TOKEN`         | unset                   | bearer token, if scratchcad was started with one. Only this process sends it; the editor's requests get it added by the proxy |
-| `SCRATCHCAD_MCP_TIMEOUT_S`     | `60`                    | HTTP timeout per request to scratchcad                                                                                        |
+| `SCRATCHCAD_MCP_TIMEOUT_S`     | `90`                    | HTTP timeout per request to scratchcad                                                                                        |
 | `SCRATCHCAD_MCP_OUTPUT_DIR`    | the working directory   | where scripts and meshes are read and written                                                                                 |
 | `SCRATCHCAD_MCP_TRANSPORT`     | `stdio`                 | `stdio`, or `http` for streamable HTTP at `/mcp`                                                                              |
 | `SCRATCHCAD_MCP_HOST`          | `127.0.0.1`             | HTTP bind address (editor, and `/mcp` in HTTP mode)                                                                           |

@@ -26,12 +26,16 @@ pub struct ShapeSummary {
     /// Whether OpenCASCADE's checker finds the shape valid
     pub valid: bool,
     pub bounding_box: BoundingBox,
-    /// Enclosed volume; 0 without solids
-    pub volume: f64,
-    /// Total area of the faces
-    pub area: f64,
-    /// Center of mass (of the volume, else the area, else the edges)
-    pub center: [f64; 3],
+    /// Enclosed volume; 0 without solids. Left out with the mass properties.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
+    /// Total area of the faces. Left out with the mass properties.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub area: Option<f64>,
+    /// Center of mass (of the volume, else the area, else the edges). Left out with the mass
+    /// properties.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 3]>,
 }
 
 /// A shape OpenCASCADE can't measure
@@ -48,9 +52,15 @@ fn array(v: DVec3) -> [f64; 3] {
     v.to_array()
 }
 
-/// Measures the shape and lists what is likely to go wrong with it
-pub fn summarize(shape: &Shape) -> Result<(ShapeSummary, Vec<String>), ApiError> {
+/// Measures the shape and lists what is likely to go wrong with it. Without `mass`, the
+/// volume, area and center, which take the longest to measure, are left out.
+pub fn summarize(shape: &Shape, mass: bool) -> Result<(ShapeSummary, Vec<String>), ApiError> {
     let bbox = bounding_box(shape)?;
+    let mass = if mass {
+        Some(shape.mass_properties().map_err(measure_error)?)
+    } else {
+        None
+    };
     let summary = ShapeSummary {
         kind: shape.shape_type().name().into(),
         solids: shape.solids().len(),
@@ -63,9 +73,9 @@ pub fn summarize(shape: &Shape) -> Result<(ShapeSummary, Vec<String>), ApiError>
             max: array(bbox.max),
             size: array(bbox.size()),
         },
-        volume: shape.volume().map_err(measure_error)?,
-        area: shape.area().map_err(measure_error)?,
-        center: array(shape.center().map_err(measure_error)?),
+        volume: mass.map(|m| m.volume),
+        area: mass.map(|m| m.area),
+        center: mass.map(|m| array(m.center)),
     };
     let warnings = warnings(&summary);
     Ok((summary, warnings))
@@ -103,7 +113,7 @@ mod tests {
 
     fn summary_of(script: &str) -> (ShapeSummary, Vec<String>) {
         let shape = scratchcad_occt_rhai::eval_shape(script).unwrap();
-        summarize(&shape).unwrap()
+        summarize(&shape, true).unwrap()
     }
 
     #[test]
@@ -116,16 +126,24 @@ mod tests {
         assert!(s.valid);
         assert_eq!(s.bounding_box.size, [10.0, 20.0, 30.0]);
         assert!(s.bounding_box.min.iter().all(|v| v.abs() < 1e-6));
-        assert!((s.volume - 6000.0).abs() < 1e-6);
-        assert!((s.area - 2200.0).abs() < 1e-6);
-        assert!((s.center[2] - 15.0).abs() < 1e-9);
+        assert!((s.volume.unwrap() - 6000.0).abs() < 1e-6);
+        assert!((s.area.unwrap() - 2200.0).abs() < 1e-6);
+        assert!((s.center.unwrap()[2] - 15.0).abs() < 1e-9);
         assert!(warnings.is_empty());
+
+        let shape = scratchcad_occt_rhai::eval_shape("box(10, 20, 30)").unwrap();
+        let (quick, _) = summarize(&shape, false).unwrap();
+        assert_eq!((quick.volume, quick.area, quick.center), (None, None, None));
+        assert_eq!(quick.bounding_box, s.bounding_box);
     }
 
     #[test]
     fn warns_about_shapes_without_solids() {
         let (s, warnings) = summary_of("box(1, 1, 1).face(\">Z\")");
-        assert_eq!((s.kind.as_str(), s.solids, s.volume), ("face", 0, 0.0));
+        assert_eq!(
+            (s.kind.as_str(), s.solids, s.volume),
+            ("face", 0, Some(0.0))
+        );
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("face with faces but no enclosed volume"));
 

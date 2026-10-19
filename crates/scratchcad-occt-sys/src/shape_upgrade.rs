@@ -24,5 +24,9 @@ mod inner {
         pub fn build(self: Pin<&mut ShapeUpgrade_UnifySameDomain>) -> Result<()>;
         #[cxx_name = "Shape"]
         pub fn shape(self: &ShapeUpgrade_UnifySameDomain) -> Result<&TopoDS_Shape>;
+
+        pub fn ShapeUpgrade_convert_to_bezier(
+            shape: &TopoDS_Shape,
+        ) -> Result<UniquePtr<TopoDS_Shape>>;
     }
 }

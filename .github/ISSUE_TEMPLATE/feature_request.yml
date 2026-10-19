@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a new scripting function, tool, editor feature or other improvement
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please search the [existing issues](https://github.com/scratchcad/scratchcad/issues) first.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of scratchcad would this change? Pick "Not sure" if you don't know.
+      options:
+        - Server (scratchcad HTTP service)
+        - MCP server
+        - Editor
+        - Scripting API (scratchcad-occt-rhai)
+        - OpenCASCADE bindings (scratchcad-occt-sys)
+        - Docker / compose setup
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to model or do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like to happen. For a scripting function, a sketch of how a script would call it helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, or other ways to solve it.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to open a pull request for this (see [CONTRIBUTING.md](https://github.com/scratchcad/scratchcad/blob/main/CONTRIBUTING.md))

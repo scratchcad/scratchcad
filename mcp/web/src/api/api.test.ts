@@ -28,9 +28,6 @@ const SHAPE = {
   vertices: 8,
   valid: true,
   bounding_box: { min: [0, 0, 0], max: [1, 2, 3], size: [1, 2, 3] },
-  volume: 6,
-  area: 22,
-  center: [0.5, 1, 1.5],
 };
 
 describe("scratchcad", () => {
@@ -47,7 +44,7 @@ describe("scratchcad", () => {
     expect(fetch).toHaveBeenCalledWith("/api/scratchcad/v1/scripts/validate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ script: "box(1, 2, 3)" }),
+      body: JSON.stringify({ script: "box(1, 2, 3)", mass_properties: false }),
       signal: undefined,
     });
   });

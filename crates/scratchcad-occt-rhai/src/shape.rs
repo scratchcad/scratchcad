@@ -1063,14 +1063,47 @@ impl Shape {
         self.props(|s, p| ffi::b_rep_g_prop::BRepGProp::LinearProperties(s, p, true, false))
     }
 
+    /// The shape to measure: itself when all its geometry is analytic (lines, conics, planes,
+    /// cylinders, cones, spheres and tori), and otherwise a copy split into Bézier pieces, one
+    /// per span of every B-spline curve and surface. OpenCASCADE integrates each face at a fixed
+    /// number of Gauss points: exact for analytic faces, but off by percent on lofts, sweeps and
+    /// extruded splines, whose faces have many spans. On a single Bézier patch the same
+    /// integration is accurate, to about 1e-7. (Its adaptive integrations report a tiny error on
+    /// such faces while getting them wrong, and can take minutes.) Fails if the conversion
+    /// does, rather than measuring the shape wrong.
+    fn for_measuring(&self) -> Result<Self> {
+        let free_form = |s: &Shape| {
+            // Degenerate edges, at the poles of a sphere, have no curve and need nothing.
+            matches!(
+                s.geom_type(),
+                Ok("bezier" | "bspline" | "revolution" | "extrusion" | "offset" | "other")
+            )
+        };
+        if !self.faces().iter().any(free_form) && !self.edges().iter().any(free_form) {
+            return Ok(self.clone());
+        }
+        Self::from_unique(ffi::shape_upgrade::ShapeUpgrade_convert_to_bezier(self.raw())?)
+    }
+
     /// The enclosed volume (0 for shapes without solids).
     pub fn volume(&self) -> Result<f64> {
-        Ok(self.volume_props()?.Mass().abs())
+        Ok(self.for_measuring()?.volume_props()?.Mass().abs())
     }
 
     /// The total area of all faces.
     pub fn area(&self) -> Result<f64> {
-        Ok(self.surface_props()?.Mass())
+        Ok(self.for_measuring()?.surface_props()?.Mass())
+    }
+
+    /// The volume, area and center of mass together, which splits the shape for measuring
+    /// once instead of three times.
+    pub fn mass_properties(&self) -> Result<MassProperties> {
+        let exact = self.for_measuring()?;
+        Ok(MassProperties {
+            volume: exact.volume_props()?.Mass().abs(),
+            area: exact.surface_props()?.Mass(),
+            center: exact.center_of_mass()?,
+        })
     }
 
     /// The total length of all edges.
@@ -1081,6 +1114,10 @@ impl Shape {
     /// The center of mass, using the highest-dimensional content of the shape: volume for
     /// solids, area for faces and shells, length for edges and wires.
     pub fn center(&self) -> Result<DVec3> {
+        self.for_measuring()?.center_of_mass()
+    }
+
+    fn center_of_mass(&self) -> Result<DVec3> {
         let props = match self.shape_type() {
             ShapeType::Vertex => return self.point(),
             ShapeType::Edge | ShapeType::Wire => self.linear_props()?,
@@ -1387,6 +1424,17 @@ impl PartialEq for Shape {
     fn eq(&self, other: &Self) -> bool {
         self.is_same(other)
     }
+}
+
+/// What [`Shape::mass_properties`] measures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MassProperties {
+    /// The enclosed volume (0 for shapes without solids).
+    pub volume: f64,
+    /// The total area of all faces.
+    pub area: f64,
+    /// The center of mass, as [`Shape::center`] finds it.
+    pub center: DVec3,
 }
 
 /// An axis-aligned bounding box.

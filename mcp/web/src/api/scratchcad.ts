@@ -5,7 +5,10 @@ import { errorFrom } from "./errors";
 
 const BASE = "/api/scratchcad/v1";
 
-/** What scratchcad reports about the shape a script builds. */
+/**
+ * What scratchcad reports about the shape a script builds. The editor leaves out the volume,
+ * area and center, which it never shows and which take the longest to measure.
+ */
 export interface ShapeSummary {
   type: string;
   solids: number;
@@ -14,9 +17,6 @@ export interface ShapeSummary {
   vertices: number;
   valid: boolean;
   bounding_box: { min: number[]; max: number[]; size: number[] };
-  volume: number;
-  area: number;
-  center: number[];
 }
 
 export interface Validated {
@@ -48,7 +48,7 @@ async function post(path: string, body: unknown, signal?: AbortSignal): Promise<
 }
 
 export async function validate(script: string, signal?: AbortSignal): Promise<Validated> {
-  const response = await post("/scripts/validate", { script }, signal);
+  const response = await post("/scripts/validate", { script, mass_properties: false }, signal);
   const body = (await response.json()) as Omit<Validated, "scriptMs"> & { script_ms: number };
   return {
     shape: body.shape,

@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in scratchcad, the MCP server, the editor or the crates doesn't work as it should
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please search the [existing issues](https://github.com/scratchcad/scratchcad/issues) first.
+        **Security vulnerabilities** don't belong here: report them privately as described in [SECURITY.md](https://github.com/scratchcad/scratchcad/blob/main/SECURITY.md).
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of scratchcad is affected? Pick "Not sure" if you don't know.
+      options:
+        - Server (scratchcad HTTP service)
+        - MCP server
+        - Editor
+        - Scripting API (scratchcad-occt-rhai)
+        - OpenCASCADE bindings (scratchcad-occt-sys)
+        - Docker / compose setup
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, including any error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: script
+    attributes:
+      label: Script or steps to reproduce
+      description: The smallest Rhai script that shows the bug, or the steps you took (and the prompt, if an agent was involved).
+      render: rhai
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release (e.g. v0.3.0) or the commit you're running.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: How you run scratchcad (docker compose, a local build, a deployed server), your OS, and the MCP client and model if relevant.
+      placeholder: |
+        - Setup: docker compose
+        - OS: macOS 16
+        - MCP client: Claude Code
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from the server or MCP server (`docker compose logs`).
+      render: text

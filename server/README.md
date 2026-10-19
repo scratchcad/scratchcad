@@ -106,6 +106,13 @@ trouble later: an invalid shape, or one with no solids (a face or wire where a
 solid was probably meant). An invalid script returns the same `422` error the
 other endpoints would.
 
+`volume`, `area` and `center` are exact to about 1e-7 of their size, also on
+lofts, sweeps and other B-spline surfaces, which are measured on a copy split
+into Bézier patches. On parts with a lot of B-spline geometry that takes the
+longest of anything here (seconds for a 29-blade blisk), so
+`"mass_properties": false` leaves the three out for callers that only need the
+shape's size and topology, such as the editor's preview.
+
 ### `POST /v1/raster/3d` → `image/png` (RGBA, transparent background)
 
 A small software rasterizer over the shape's mesh: a z-buffer, Lambert
@@ -214,9 +221,9 @@ Every option is a flag or an environment variable (`scratchcad --help`):
 | `SCRATCHCAD_LOG_FORMAT` | `text` | `text` or `json` |
 | `SCRATCHCAD_MAX_CONCURRENT_JOBS` | `4` | parallel jobs |
 | `SCRATCHCAD_QUEUE_TIMEOUT_MS` | `5000` | max wait for a job slot |
-| `SCRATCHCAD_JOB_TIMEOUT_MS` | `30000` | per-job budget; the worker is killed when it runs out |
+| `SCRATCHCAD_JOB_TIMEOUT_MS` | `60000` | per-job budget; the worker is killed when it runs out |
 | `SCRATCHCAD_WORKER_MEMORY_MIB` | `2048` | heap each job's worker may use |
-| `SCRATCHCAD_WORKER_CPU_SECONDS` | `60` | CPU time each job's worker may use |
+| `SCRATCHCAD_WORKER_CPU_SECONDS` | `120` | CPU time each job's worker may use |
 | `SCRATCHCAD_MAX_BODY_BYTES` | `4194304` | request body cap |
 | `SCRATCHCAD_MAX_SCRIPT_BYTES` | `65536` | script size cap |
 | `SCRATCHCAD_MAX_SCRIPT_OPERATIONS` | `1000000` | Rhai operation budget |
