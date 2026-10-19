@@ -680,11 +680,18 @@ impl Shape {
         Self::from_raw(&result)
     }
 
-    /// The union of all shapes.
+    /// The union of all shapes, in one operation: much faster than fusing them one at a time,
+    /// which intersects the growing result with each shape in turn.
     pub fn fuse_all(shapes: &[Shape]) -> Result<Self> {
         let (first, rest) =
             shapes.split_first().ok_or_else(|| invalid("fuse_all needs at least one shape"))?;
-        rest.iter().try_fold(first.clone(), |acc, shape| acc.fuse(shape))
+        if rest.is_empty() {
+            return Ok(first.clone());
+        }
+        let tools = Self::compound(rest)?;
+        let result =
+            first.boolean(&tools, "fuse", ffi::b_rep_algo_api::BRepAlgoAPI_fuse_children)?;
+        Self::from_algorithm(&result)
     }
 
     // ---------------------------------------------------------------------------------------

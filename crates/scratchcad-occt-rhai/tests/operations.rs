@@ -26,6 +26,14 @@ fn booleans() {
     let all = Shape::fuse_all(&[a.clone(), b, far]).unwrap();
     assert_close(all.volume().unwrap(), 23.0, 1e-6);
     assert_eq!(Shape::fuse_all(std::slice::from_ref(&a)).unwrap(), a);
+    // Many shapes fuse in one operation: a 150 x 3 x 2 bar with 50 pins sunk 1 mm into it.
+    let mut parts = vec![Shape::make_box(150.0, 3.0, 2.0).unwrap()];
+    parts.extend((0..50).map(|i| {
+        Shape::cylinder_at(v(1.5 + 3.0 * i as f64, 1.5, 1.0), DVec3::Z, 1.0, 5.0).unwrap()
+    }));
+    let comb = Shape::fuse_all(&parts).unwrap();
+    assert_eq!(comb.solids().len(), 1);
+    assert_close(comb.volume().unwrap(), 900.0 + 50.0 * PI * 4.0, 1e-6);
     err_contains(Shape::fuse_all(&[]), "at least one shape");
 }
 

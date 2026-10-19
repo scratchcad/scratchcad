@@ -6,18 +6,17 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Section.hxx>
 #include <TopTools_ListOfShape.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <bindings_common.hxx>
 
 // Runs a boolean operation in OpenCASCADE's "safe processing mode", which never modifies the
 // arguments (by default the operation may, for example, raise the tolerances of their
 // sub-shapes). The operation stops early when `range` asks it to. Returns null if it fails.
 template <typename Operation>
-std::unique_ptr<TopoDS_Shape> run_boolean(const TopoDS_Shape &argument, const TopoDS_Shape &tool,
+std::unique_ptr<TopoDS_Shape> run_boolean(const TopoDS_Shape &argument, const TopTools_ListOfShape &tools,
                                           const Message_ProgressRange &range) {
   TopTools_ListOfShape arguments;
   arguments.Append(argument);
-  TopTools_ListOfShape tools;
-  tools.Append(tool);
   Operation operation;
   operation.SetArguments(arguments);
   operation.SetTools(tools);
@@ -29,9 +28,28 @@ std::unique_ptr<TopoDS_Shape> run_boolean(const TopoDS_Shape &argument, const To
   return std::unique_ptr<TopoDS_Shape>(new TopoDS_Shape(operation.Shape()));
 }
 
+template <typename Operation>
+std::unique_ptr<TopoDS_Shape> run_boolean(const TopoDS_Shape &argument, const TopoDS_Shape &tool,
+                                          const Message_ProgressRange &range) {
+  TopTools_ListOfShape tools;
+  tools.Append(tool);
+  return run_boolean<Operation>(argument, tools, range);
+}
+
 inline std::unique_ptr<TopoDS_Shape> BRepAlgoAPI_fuse(const TopoDS_Shape &a, const TopoDS_Shape &b,
                                                       const Message_ProgressRange &range) {
   return run_boolean<BRepAlgoAPI_Fuse>(a, b, range);
+}
+
+// Fuses `argument` with every child of the compound `tools` in one operation, which is much faster
+// than fusing them one at a time: each pairwise fuse intersects the growing result again.
+inline std::unique_ptr<TopoDS_Shape> BRepAlgoAPI_fuse_children(const TopoDS_Shape &argument, const TopoDS_Shape &tools,
+                                                               const Message_ProgressRange &range) {
+  TopTools_ListOfShape list;
+  for (TopoDS_Iterator it(tools); it.More(); it.Next()) {
+    list.Append(it.Value());
+  }
+  return run_boolean<BRepAlgoAPI_Fuse>(argument, list, range);
 }
 
 inline std::unique_ptr<TopoDS_Shape> BRepAlgoAPI_cut(const TopoDS_Shape &a, const TopoDS_Shape &b,

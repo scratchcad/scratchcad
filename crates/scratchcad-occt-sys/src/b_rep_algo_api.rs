@@ -82,6 +82,12 @@ mod inner {
             b: &TopoDS_Shape,
             progress: &Message_ProgressRange,
         ) -> Result<UniquePtr<TopoDS_Shape>>;
+        /// Fuses `a` with every child of the compound `tools` in one operation.
+        pub fn BRepAlgoAPI_fuse_children(
+            a: &TopoDS_Shape,
+            tools: &TopoDS_Shape,
+            progress: &Message_ProgressRange,
+        ) -> Result<UniquePtr<TopoDS_Shape>>;
         pub fn BRepAlgoAPI_cut(
             a: &TopoDS_Shape,
             b: &TopoDS_Shape,

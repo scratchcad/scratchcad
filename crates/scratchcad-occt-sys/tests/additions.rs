@@ -5,7 +5,7 @@ mod common;
 
 use common::{assert_close, make_box, make_box_at, pnt, progress, unique_count, volume};
 use scratchcad_occt_sys::{
-    b_rep_algo_api, b_rep_builder_api, b_rep_class3d,
+    b_rep, b_rep_algo_api, b_rep_builder_api, b_rep_class3d,
     b_rep_g_prop::BRepGProp,
     b_rep_mesh, b_rep_tools, g_prop,
     if_select::IFSelect_ReturnStatus,
@@ -13,6 +13,7 @@ use scratchcad_occt_sys::{
     message::{self, CancelFlag, Message_Gravity},
     step_control,
     top_abs::{TopAbs_ShapeEnum, TopAbs_State},
+    topo_ds,
 };
 use std::sync::{Arc, Mutex};
 
@@ -83,6 +84,20 @@ fn non_destructive_booleans() {
     // The arguments keep their original volumes.
     assert_close(volume(&a), 8.0, 1e-9);
     assert_close(volume(&b), 8.0, 1e-9);
+
+    // Fusing with every child of a compound at once: two boxes overlapping `a` and each other,
+    // and one apart from it.
+    let builder = b_rep::BRep_Builder_new();
+    let builder = b_rep::BRep_Builder_upcast_to_topods_builder(&builder);
+    let mut tools = topo_ds::TopoDS_Compound_new();
+    builder.MakeCompound(tools.pin_mut());
+    let mut tools = topo_ds::TopoDS_Compound_as_shape(tools);
+    builder.Add(tools.pin_mut(), &b).unwrap();
+    builder.Add(tools.pin_mut(), &make_box_at(2.0, 2.0, 2.0, 1.0, 1.0, 1.0)).unwrap();
+    builder.Add(tools.pin_mut(), &make_box_at(10.0, 0.0, 0.0, 1.0, 1.0, 1.0)).unwrap();
+    let all = b_rep_algo_api::BRepAlgoAPI_fuse_children(&a, &tools, &progress()).unwrap();
+    assert_close(volume(&all), 16.0, 1e-9);
+    assert_eq!(unique_count(&all, TopAbs_ShapeEnum::TopAbs_SOLID), 2);
 }
 
 #[test]
