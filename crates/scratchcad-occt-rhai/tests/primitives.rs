@@ -189,6 +189,15 @@ fn wires_faces_and_compounds() {
     let disk = Shape::face_from(&Shape::circle_edge(DVec3::ZERO, DVec3::Z, 1.0).unwrap()).unwrap();
     assert_close(disk.area().unwrap(), PI, 1e-9);
     err_contains(Shape::face_from(&Shape::wire_from(&[a, b]).unwrap()), "closed wire");
+    // An outline that runs back across itself (a figure eight) bounds no face.
+    let crossed = Shape::polygon(&[
+        v(0.0, 0.0, 0.0),
+        v(10.0, 10.0, 0.0),
+        v(10.0, 0.0, 0.0),
+        v(0.0, 10.0, 0.0),
+    ])
+    .unwrap();
+    err_contains(Shape::face_from(&crossed), "crosses or touches itself");
     let skew = Shape::polygon(&[DVec3::ZERO, DVec3::X, v(1.0, 1.0, 1.0), DVec3::Y]).unwrap();
     err_contains(Shape::face_from(&skew), "not planar");
     err_contains(Shape::face_from(&solid), "expected wire or face, got solid");

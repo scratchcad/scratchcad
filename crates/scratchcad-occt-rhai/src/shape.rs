@@ -602,7 +602,16 @@ impl Shape {
                 if !make.IsDone() {
                     return Err(invalid("cannot make a face: the wire is not planar"));
                 }
-                Self::from_raw(make.pin_mut().Shape()?)
+                let face = Self::from_raw(make.pin_mut().Shape()?)?;
+                // OpenCASCADE makes a face from an outline that crosses itself, and everything
+                // built on it is invalid: say so here rather than when a fillet or mesh fails.
+                if !face.is_valid() {
+                    return Err(invalid(
+                        "cannot make a face: the outline crosses or touches itself; check its \
+                         points (with sketches, that no line runs back over an earlier one)",
+                    ));
+                }
+                Ok(face)
             },
             ShapeType::Edge => Self::face_from(&Self::wire_from(std::slice::from_ref(boundary))?),
             other => Err(Error::WrongShapeType { expected: "wire or face", actual: other.name() }),
