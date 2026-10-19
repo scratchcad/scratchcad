@@ -40,6 +40,7 @@ const meshFormats = FORMATS.filter((f) => FORMAT_INFO[f].mesh);
 const readOnly = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
 const writing = { readOnlyHint: false, destructiveHint: true };
 
+const missingMass = "Left out, with a warning, when OpenCASCADE can't measure the shape.";
 const shapeSummary = z
   .looseObject({
     type: z.string().describe("solid, compound, shell, face, wire, edge or vertex."),
@@ -49,9 +50,9 @@ const shapeSummary = z
     vertices: z.number().int(),
     valid: z.boolean().describe("Whether OpenCASCADE's checker finds the shape valid."),
     bounding_box: z.looseObject({ min: vec3, max: vec3, size: vec3 }),
-    volume: z.number(),
-    area: z.number(),
-    center: vec3.describe("Center of mass."),
+    volume: z.number().optional().describe(missingMass),
+    area: z.number().optional().describe(missingMass),
+    center: vec3.optional().describe(`Center of mass. ${missingMass}`),
   })
   .describe("What the script built.");
 const shapeWarnings = z

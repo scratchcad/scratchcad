@@ -137,7 +137,10 @@ others, such as servers:
   conics, planes, cylinders, cones, spheres, tori). A shape with B-spline curves or surfaces
   (lofts, sweeps, splines) is measured on a copy split into Bézier patches, to about 1e-7 of
   the result; integrating its B-spline faces directly is off by percent. That split is the
-  slow part, so `shape.mass_properties()` returns all three from one split.
+  slow part, so `shape.mass_properties()` returns all three from one split. The split works on a
+  deep copy, cutting closed faces open first, so measuring never changes the shape or the shapes it
+  shares geometry with. If it fails, the shape is integrated directly, and `MassProperties::exact`
+  is `false`.
 * **Console output.** OpenCASCADE prints to stdout. `set_message_handler(level, |level, text| ..)`
   receives its messages instead; `set_occt_messages(false)` sends only failures, to stderr.
 * **Threads.** `Shape` is neither `Send` nor `Sync`: OpenCASCADE shares sub-shapes between shapes

@@ -113,6 +113,10 @@ longest of anything here (seconds for a 29-blade blisk), so
 `"mass_properties": false` leaves the three out for callers that only need the
 shape's size and topology, such as the editor's preview.
 
+If the B-spline geometry can't be split into patches, the three are integrated directly
+instead, which can be off by about a percent, and a warning says so; if OpenCASCADE can't
+measure them at all, they are left out with a warning rather than failing the request.
+
 ### `POST /v1/raster/3d` → `image/png` (RGBA, transparent background)
 
 A small software rasterizer over the shape's mesh: a z-buffer, Lambert

@@ -116,6 +116,59 @@ fn measures_spline_solids_exactly() {
 }
 
 #[test]
+fn measuring_leaves_shapes_alone() {
+    // A torus fused with a cylinder through its tube: the intersection edges are B-splines, so
+    // the fuse is measured on a copy split into Bézier patches. Splitting the shape itself
+    // changed the edges it shares with the torus, which then cut to nothing; and splitting the
+    // edges on the torus, which wraps around both ways, lost the torus's volume.
+    let torus = Shape::torus(17.5, 5.0).unwrap();
+    let cylinder = Shape::cylinder_at(v(17.5, 0.0, -10.0), DVec3::Z, 2.0, 20.0).unwrap();
+    let side = Shape::box_from_corners(v(10.0, -50.0, -50.0), v(50.0, 50.0, 50.0)).unwrap();
+    let before = torus.cut(&side).unwrap().volume().unwrap();
+    let fused = torus.fuse(&cylinder).unwrap();
+    // 2 pi^2 R r^2 for the torus, and 128.232 of the cylinder outside it (integrated numerically).
+    let exact = 2.0 * PI * PI * 17.5 * 25.0 + 128.232008;
+    let mass = fused.mass_properties().unwrap();
+    assert!(mass.exact);
+    assert_close(mass.volume, exact, 1e-6 * exact);
+    assert_close(fused.volume().unwrap(), exact, 1e-6 * exact);
+    assert!(fused.is_valid() && torus.is_valid());
+    assert_close(torus.cut(&side).unwrap().volume().unwrap(), before, 1e-9 * before);
+}
+
+#[test]
+fn measures_approximately_what_cannot_be_split() {
+    // A helical slot whose inner edge runs along a bore of the same radius: OpenCASCADE cannot
+    // split the result into Bézier patches, so it is measured directly, and says so.
+    let blade = Shape::polygon(&[
+        v(2.5, 0.0, -0.35),
+        v(10.5, 0.0, -0.35),
+        v(10.5, 0.0, 0.35),
+        v(2.5, 0.0, 0.35),
+    ])
+    .unwrap();
+    let sections: Vec<Shape> = (0..=36)
+        .map(|i| {
+            let t = i as f64 / 12.0;
+            let turned = blade.rotate(DVec3::ZERO, DVec3::Z, t * 360.0).unwrap();
+            turned.translate(v(0.0, 0.0, 8.0 + t * 3.0)).unwrap()
+        })
+        .collect();
+    let tube =
+        Shape::cylinder(9.5, 25.0).unwrap().cut(&Shape::cylinder(2.5, 25.0).unwrap()).unwrap();
+    let slotted = tube.cut(&Shape::loft(&sections, true).unwrap()).unwrap();
+    let mass = slotted.mass_properties().unwrap();
+    assert!(!mass.exact);
+    // The tube's volume, less a slot 0.7 mm wide through its 7 mm wall over three turns (about
+    // 2 pi 6 mm long each).
+    let slot = 0.7 * 7.0 * 3.0 * 2.0 * PI * 6.0;
+    let tube_volume = PI * (9.5 * 9.5 - 2.5 * 2.5) * 25.0;
+    assert_close(mass.volume, tube_volume - slot, 0.02 * slot);
+    assert_close(slotted.volume().unwrap(), mass.volume, 1e-9);
+    assert!(slotted.is_valid());
+}
+
+#[test]
 fn extrusions() {
     let square = Shape::rect_on(&Plane::xy(), 2.0, 3.0).unwrap();
     let prism = square.extrude(v(0.0, 0.0, 4.0)).unwrap();
