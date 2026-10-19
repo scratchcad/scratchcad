@@ -116,6 +116,34 @@ fn measures_spline_solids_exactly() {
 }
 
 #[test]
+fn bounding_boxes_are_tight_on_trimmed_curved_faces() {
+    // A tube swept along a helix and cut square at z = 0 and z = 6: OpenCASCADE alone bounds its
+    // cut B-spline face as if it were uncut, half the wire's thickness below 0 and above 6.
+    let points: Vec<DVec3> = (0..=72)
+        .map(|i| {
+            let a = (i as f64 * 15.0).to_radians();
+            v(4.5 * a.cos(), 4.5 * a.sin(), i as f64 * 0.125)
+        })
+        .collect();
+    let path = Shape::wire_from(&[Shape::spline(&points, false).unwrap()]).unwrap();
+    let wire = Shape::circle(v(4.5, 0.0, 0.0), DVec3::Y, 0.5).unwrap();
+    let coil = Shape::face_from(&wire).unwrap().sweep(&path).unwrap();
+    let cut = coil.common(&Shape::box_from_corners(v(-9.0, -9.0, 0.0), v(9.0, 9.0, 6.0)).unwrap());
+    let b = cut.unwrap().bounding_box().unwrap();
+    assert_close(b.min.z, 0.0, 1e-6);
+    assert_close(b.max.z, 6.0, 1e-6);
+    assert_close(b.max.x, 5.0, 1e-4);
+
+    // A tilted torus reaches R sin(tilt) + r up and down.
+    let torus = Shape::torus(17.5, 5.0).unwrap().rotate(DVec3::ZERO, DVec3::X, 37.0).unwrap();
+    let b = torus.bounding_box().unwrap();
+    let reach = 17.5 * 37f64.to_radians().sin() + 5.0;
+    assert_close(b.max.z, reach, 1e-6);
+    assert_close(b.min.z, -reach, 1e-6);
+    assert_close(b.max.x, 22.5, 1e-6);
+}
+
+#[test]
 fn extrusions() {
     let square = Shape::rect_on(&Plane::xy(), 2.0, 3.0).unwrap();
     let prism = square.extrude(v(0.0, 0.0, 4.0)).unwrap();
