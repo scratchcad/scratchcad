@@ -63,6 +63,59 @@ fn transforms() {
 }
 
 #[test]
+fn measures_spline_solids_exactly() {
+    // A wavy closed spline through 40 points. Integrated directly, the prism's volume came out
+    // 0.6% high and its cap's area 0.1% low, because their B-spline faces have many spans.
+    let points: Vec<DVec3> = (0..40)
+        .map(|i| {
+            let a = i as f64 / 40.0 * 2.0 * PI;
+            let r = 10.0 + 2.0 * (5.0 * a).sin();
+            v(r * a.cos(), r * a.sin(), 0.0)
+        })
+        .collect();
+    let spline = Shape::spline(&points, true).unwrap();
+    // The reference: a polygon through 20000 points on the spline.
+    let samples: Vec<DVec3> =
+        (0..20000).map(|i| spline.point_at(i as f64 / 20000.0).unwrap()).collect();
+    let (mut area, mut perimeter) = (0.0, 0.0);
+    for (i, p) in samples.iter().enumerate() {
+        let q = samples[(i + 1) % samples.len()];
+        area += (p.x * q.y - q.x * p.y) / 2.0;
+        perimeter += p.distance(q);
+    }
+
+    let face = Shape::face_from(&Shape::wire_from(&[spline]).unwrap()).unwrap();
+    assert_close(face.area().unwrap(), area, 1e-6 * area);
+    let prism = face.extrude(v(0.0, 0.0, 40.0)).unwrap();
+    let surface = 2.0 * area + perimeter * 40.0;
+    assert_close(prism.volume().unwrap(), area * 40.0, 1e-6 * area * 40.0);
+    assert_close(prism.area().unwrap(), surface, 1e-6 * surface);
+    assert_close(prism.center().unwrap().z, 20.0, 1e-6);
+    let mass = prism.mass_properties().unwrap();
+    assert_close(mass.volume, area * 40.0, 1e-6 * area * 40.0);
+    assert_close(mass.area, surface, 1e-6 * surface);
+    assert_vec_close(mass.center, prism.center().unwrap(), 1e-9);
+
+    // A loft through copies of the section turned as they rise is a twisted prism of the same
+    // volume (to within how closely the loft follows the sections).
+    let sections: Vec<Shape> = (0..5)
+        .map(|k| {
+            let section = Shape::wire_from(&[Shape::spline(&points, true).unwrap()]).unwrap();
+            let raised = section.translate(v(0.0, 0.0, 10.0 * k as f64)).unwrap();
+            raised.rotate(DVec3::ZERO, DVec3::Z, 5.0 * k as f64).unwrap()
+        })
+        .collect();
+    let twisted = Shape::loft(&sections, true).unwrap();
+    assert_close(twisted.volume().unwrap(), area * 40.0, 1e-3 * area * 40.0);
+    // Shapes without faces still measure: a wire has no volume or area, and its center is
+    // the middle of its length.
+    let wire = Shape::wire_from(&[Shape::line(DVec3::ZERO, v(4.0, 0.0, 0.0)).unwrap()]).unwrap();
+    let mass = wire.mass_properties().unwrap();
+    assert_eq!((mass.volume, mass.area), (0.0, 0.0));
+    assert_vec_close(mass.center, v(2.0, 0.0, 0.0), 1e-9);
+}
+
+#[test]
 fn extrusions() {
     let square = Shape::rect_on(&Plane::xy(), 2.0, 3.0).unwrap();
     let prism = square.extrude(v(0.0, 0.0, 4.0)).unwrap();

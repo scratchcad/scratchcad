@@ -73,7 +73,9 @@ pub use rhai;
 pub use scratchcad_occt_sys as ffi;
 pub use script::{register, to_shape};
 pub use selection::{Selection, TOLERANCE};
-pub use shape::{BoundingBox, DetachedShape, PointLocation, Shape, ShapeType, CLASSIFY_TOLERANCE};
+pub use shape::{
+    BoundingBox, DetachedShape, MassProperties, PointLocation, Shape, ShapeType, CLASSIFY_TOLERANCE,
+};
 pub use sketch::Sketch;
 
 use rhai::{Dynamic, Engine, EvalAltResult};

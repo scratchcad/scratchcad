@@ -133,6 +133,11 @@ others, such as servers:
   relative tolerances and parallel meshing. Meshing never modifies the shape (it works on a copy),
   `mesh.face_triangles` tells which triangles belong to which face, and `mesh.welded()` merges the
   vertices faces share, making the mesh of a solid watertight.
+* **Measuring.** `volume()`, `area()` and `center()` are exact for analytic geometry (lines,
+  conics, planes, cylinders, cones, spheres, tori). A shape with B-spline curves or surfaces
+  (lofts, sweeps, splines) is measured on a copy split into Bézier patches, to about 1e-7 of
+  the result; integrating its B-spline faces directly is off by percent. That split is the
+  slow part, so `shape.mass_properties()` returns all three from one split.
 * **Console output.** OpenCASCADE prints to stdout. `set_message_handler(level, |level, text| ..)`
   receives its messages instead; `set_occt_messages(false)` sends only failures, to stderr.
 * **Threads.** `Shape` is neither `Send` nor `Sync`: OpenCASCADE shares sub-shapes between shapes

@@ -105,6 +105,12 @@ fn glued_fuse_of_touching_boxes() {
     assert_eq!(unique_count(unified, TopAbs_ShapeEnum::TopAbs_FACE), 6);
     assert_close(volume(unified), 2.0, 1e-6);
 
+    // Converting to Bézier patches keeps the geometry; planes become Bézier surfaces.
+    let bezier = shape_upgrade::ShapeUpgrade_convert_to_bezier(unified).unwrap();
+    assert!(!bezier.IsNull());
+    assert_close(volume(&bezier), 2.0, 1e-9);
+    assert_close(area(&bezier), area(unified), 1e-9);
+
     let mut full = algo::BRepAlgoAPI_Fuse_new(&a, &b).unwrap();
     full.pin_mut().SetGlue(BOPAlgo_GlueEnum::BOPAlgo_GlueFull);
     full.pin_mut().Build(&progress()).unwrap();
