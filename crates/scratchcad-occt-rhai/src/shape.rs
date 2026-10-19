@@ -802,12 +802,80 @@ impl Shape {
             },
         };
         let profile = self.as_profile()?;
-        let mut make =
-            ffi::b_rep_offset_api::BRepOffsetAPI_MakePipe_new(spine.wire()?, profile.raw())?;
-        if !make.IsDone() {
-            return Err(Error::OperationFailed("sweep"));
+        match profile.shape_type() {
+            ShapeType::Face => {
+                // The outer boundary sweeps into a solid, and so does each hole, which is then
+                // cut out of it.
+                let outer = profile.outer_wire()?;
+                let solid = Self::pipe(&spine, &outer, true)?;
+                let holes = profile
+                    .wires()
+                    .iter()
+                    .filter(|w| !w.is_same(&outer))
+                    .map(|hole| Self::pipe(&spine, &Self::face_from(hole)?.outer_wire()?, true))
+                    .collect::<Result<Vec<_>>>()?;
+                if holes.is_empty() {
+                    Ok(solid)
+                } else {
+                    solid.cut(&Self::compound(&holes)?)
+                }
+            },
+            ShapeType::Edge => Self::pipe(&spine, &Self::wire_from(&[profile])?, false),
+            ShapeType::Wire => Self::pipe(&spine, &profile, false),
+            _ => {
+                let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakePipe_new(
+                    spine.wire()?,
+                    profile.raw(),
+                )?;
+                if !make.IsDone() {
+                    return Err(Error::OperationFailed("sweep"));
+                }
+                Self::from_algorithm(make.pin_mut().Shape()?)
+            },
         }
-        Self::from_algorithm(make.pin_mut().Shape()?)
+    }
+
+    /// Sweeps the wire `profile` along `spine`, into a solid if `solid`. The profile keeps square
+    /// to the path by OpenCASCADE's corrected Frenet frame, which also follows straight runs; where
+    /// that fails or gives an invalid shape (it does on helices whose pitch changes, which
+    /// `BRepOffsetAPI_MakePipe` even crashed on), by the plain Frenet frame, which follows curves
+    /// faithfully but is undefined on straight runs. Sharp corners in the path are mitred.
+    /// `BRepOffsetAPI_MakePipe` is the last resort.
+    fn pipe(spine: &Shape, profile: &Shape, solid: bool) -> Result<Self> {
+        let attempt = |frenet: bool| -> Result<Self> {
+            let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakePipeShell_new(spine.wire()?)?;
+            make.pin_mut().SetMode(frenet);
+            ffi::b_rep_offset_api::BRepOffsetAPI_MakePipeShell_SetRightCorners(make.pin_mut());
+            make.pin_mut().Add(profile.raw(), false, false)?;
+            make.pin_mut().Build(&progress())?;
+            if !make.IsDone() || (solid && !make.pin_mut().MakeSolid()?) {
+                return Err(Error::OperationFailed("sweep"));
+            }
+            let swept = Self::from_algorithm(make.pin_mut().Shape()?)?;
+            if !swept.is_valid() {
+                return Err(Error::OperationFailed("sweep"));
+            }
+            Ok(swept)
+        };
+        attempt(false).or_else(|_| attempt(true)).or_else(|_| {
+            // Some paths that turn a corner into an arc only BRepOffsetAPI_MakePipe follows; its
+            // result is only taken when valid, as it can be garbage (or crash) where the above
+            // worked.
+            let profile = if solid { Self::face_from(profile)? } else { profile.clone() };
+            let mut make =
+                ffi::b_rep_offset_api::BRepOffsetAPI_MakePipe_new(spine.wire()?, profile.raw())?;
+            match make.IsDone() {
+                true => Self::from_algorithm(make.pin_mut().Shape()?).ok().filter(Shape::is_valid),
+                false => None,
+            }
+            .ok_or_else(|| {
+                invalid(
+                    "sweep failed: OpenCASCADE could not move the profile along this path. Start \
+                     the profile on the path's first point, square to it, and keep it smaller \
+                     than the path's tightest bend",
+                )
+            })
+        })
     }
 
     /// A shape passing through all sections (wires, or faces whose outer wire is used).
