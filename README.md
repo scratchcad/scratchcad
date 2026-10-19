@@ -33,16 +33,15 @@ streamable HTTP transport.
 
 ## Examples
 
-Each prompt was given to Claude Code twice: once with scratchcad 0.3, which modelled with
-implicit surfaces (medium effort), and once with the current OpenCASCADE version (high
-effort). The links under the current renders go to the scripts it wrote; copy one into
-`./output` to open it in the editor.
+Each part was modelled by Claude Code (on high effort) from the prompt beside it. The links
+under the renders go to the scripts it wrote; copy one into `./output` to open it in the
+editor.
 
-| prompt | 0.3 (implicit surfaces) | now (OpenCASCADE) |
-|---|---|---|
-| Create an M10 hex bolt with 26 mm thread length, a course pitch of 1.5 mm and head height 6.4 mm. Also create a matching hex nut with 8.4 mm height. Both of these should be in the same file displayed beside each other. | <img src="docs/images/0.3/m10_bolt_and_nut.gif" alt="Rotating M10 hex bolt and matching hex nut, made with scratchcad 0.3" width="240"> | <img src="docs/images/m10_bolt_and_nut.gif" alt="Rotating M10 hex bolt and matching hex nut with real threads" width="240"><br>[`m10_bolt_and_nut.rhai`](docs/examples/m10_bolt_and_nut.rhai) |
-| Create a 3DBenchy. | <img src="docs/images/0.3/benchy.gif" alt="Rotating 3DBenchy tugboat, made with scratchcad 0.3" width="240"> | <img src="docs/images/benchy.gif" alt="Rotating 3DBenchy tugboat" width="240"><br>[`benchy.rhai`](docs/examples/benchy.rhai) |
-| Create a mid-stage compressor blisk with these dimensions: an outer tip diameter of 440 mm, a hub platform diameter of 241.2 mm, and a radial blade span of 99.4 mm across its 29 twisted aerodynamic airfoils. Mechanically, the component is defined by an 80.0 mm shaft interface bore diameter, an axial hub length of 77.5 mm, and an airfoil rim width of 45.0 mm, with rear mounting flange diameters measuring 184 mm at the inner shoulder and 202 mm at the outer rim. Blade count of 29 twisted aerodynamic airfoils. | <img src="docs/images/0.3/blisk.gif" alt="Rotating 29-blade compressor blisk, made with scratchcad 0.3" width="240"> | <img src="docs/images/blisk.gif" alt="Rotating 29-blade compressor blisk" width="240"><br>[`blisk.rhai`](docs/examples/blisk.rhai) |
+| prompt | output |
+|---|---|
+| Create an M10 hex bolt with 26 mm thread length, a course pitch of 1.5 mm and head height 6.4 mm. Also create a matching hex nut with 8.4 mm height. Both of these should be in the same file displayed beside each other. | <img src="docs/images/m10_bolt_and_nut.gif" alt="Rotating M10 hex bolt and matching hex nut with real threads" width="320"><br>[`m10_bolt_and_nut.rhai`](docs/examples/m10_bolt_and_nut.rhai) |
+| Create a 3DBenchy. | <img src="docs/images/benchy.gif" alt="Rotating 3DBenchy tugboat" width="320"><br>[`benchy.rhai`](docs/examples/benchy.rhai) |
+| Create a mid-stage compressor blisk with these dimensions: an outer tip diameter of 440 mm, a hub platform diameter of 241.2 mm, and a radial blade span of 99.4 mm across its 29 twisted aerodynamic airfoils. Mechanically, the component is defined by an 80.0 mm shaft interface bore diameter, an axial hub length of 77.5 mm, and an airfoil rim width of 45.0 mm, with rear mounting flange diameters measuring 184 mm at the inner shoulder and 202 mm at the outer rim. Blade count of 29 twisted aerodynamic airfoils. | <img src="docs/images/blisk.gif" alt="Rotating 29-blade compressor blisk" width="320"><br>[`blisk.rhai`](docs/examples/blisk.rhai) |
 
 ## Scripts and the editor
 
