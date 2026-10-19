@@ -106,6 +106,13 @@ trouble later: an invalid shape, or one with no solids (a face or wire where a
 solid was probably meant). An invalid script returns the same `422` error the
 other endpoints would.
 
+`volume`, `area` and `center` are exact to about 1e-7 of their size, also on
+lofts, sweeps and other B-spline surfaces, which are measured on a copy split
+into Bézier patches. On parts with a lot of B-spline geometry that takes the
+longest of anything here (seconds for a 29-blade blisk), so
+`"mass_properties": false` leaves the three out for callers that only need the
+shape's size and topology, such as the editor's preview.
+
 ### `POST /v1/raster/3d` → `image/png` (RGBA, transparent background)
 
 A small software rasterizer over the shape's mesh: a z-buffer, Lambert

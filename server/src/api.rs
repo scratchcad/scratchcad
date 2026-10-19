@@ -140,6 +140,10 @@ fn diagonal(bbox: &scratchcad_occt_rhai::BoundingBox) -> f64 {
 #[serde(deny_unknown_fields)]
 pub struct ValidateRequest {
     script: String,
+    /// Measure the volume, area and center of mass; `false` leaves them out, for callers
+    /// that only need the shape's size and topology
+    #[serde(default = "default_true")]
+    mass_properties: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -168,7 +172,7 @@ impl ValidateRequest {
     pub(crate) fn run(self, ctx: &JobCtx) -> Result<Output, ApiError> {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
-        let (shape, warnings) = measure::summarize(&c.shape)?;
+        let (shape, warnings) = measure::summarize(&c.shape, self.mass_properties)?;
         let response = ValidateResponse {
             shape,
             output: c.output,

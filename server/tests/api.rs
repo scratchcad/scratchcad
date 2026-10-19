@@ -229,6 +229,22 @@ async fn validate_describes_the_shape() {
 }
 
 #[tokio::test]
+async fn validate_can_leave_out_mass_properties() {
+    let app = app();
+    let (_, b) = post_ok(
+        &app,
+        "/v1/scripts/validate",
+        json!({ "script": "box(10, 20, 30)", "mass_properties": false }),
+    )
+    .await;
+    let s = &json_body(&b)["shape"];
+    assert_eq!(s["bounding_box"]["size"], json!([10.0, 20.0, 30.0]));
+    for field in ["volume", "area", "center"] {
+        assert!(s.get(field).is_none(), "{field} should be left out: {s}");
+    }
+}
+
+#[tokio::test]
 async fn validate_warns_about_shapes_without_solids() {
     let (_, b) = post_ok(
         &app(),
