@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 
 export const DEFAULT_URL = "http://127.0.0.1:8080";
-// The scratchcad defaults allow a job to queue for 5 s and then run for 30 s,
+// The scratchcad defaults allow a job to queue for 5 s and then run for 60 s,
 // so the HTTP timeout needs some headroom on top of that.
-export const DEFAULT_TIMEOUT_S = 60;
+export const DEFAULT_TIMEOUT_S = 90;
 export const DEFAULT_PORT = 8000;
 // Host (and Origin) names accepted over HTTP. An allowlist keeps DNS-rebinding
 // protection on even when bound to 0.0.0.0 inside a container.

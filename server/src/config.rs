@@ -30,7 +30,7 @@ pub struct Config {
 
     /// Wall-clock budget for a single job (script + measuring, rendering or
     /// export); its worker process is killed when it runs out
-    #[arg(long, env = "SCRATCHCAD_JOB_TIMEOUT_MS", default_value_t = 30_000)]
+    #[arg(long, env = "SCRATCHCAD_JOB_TIMEOUT_MS", default_value_t = 60_000)]
     pub job_timeout_ms: u64,
 
     /// Heap memory (`RLIMIT_DATA`) each job's worker process may use, in MiB
@@ -38,7 +38,7 @@ pub struct Config {
     pub worker_memory_mib: u64,
 
     /// CPU time each job's worker process may use, in seconds
-    #[arg(long, env = "SCRATCHCAD_WORKER_CPU_SECONDS", default_value_t = 60)]
+    #[arg(long, env = "SCRATCHCAD_WORKER_CPU_SECONDS", default_value_t = 120)]
     pub worker_cpu_seconds: u64,
 
     /// Maximum request body size in bytes

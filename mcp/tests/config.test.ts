@@ -8,7 +8,7 @@ describe("settingsFromEnv", () => {
     expect(settingsFromEnv({})).toEqual({
       url: "http://127.0.0.1:8080",
       apiToken: null,
-      timeoutS: 60,
+      timeoutS: 90,
       outputDir: path.resolve("."),
       transport: "stdio",
       host: "127.0.0.1",
