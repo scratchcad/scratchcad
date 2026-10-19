@@ -76,6 +76,8 @@ the real OCCT; shared helpers are in each crate's `tests/common/mod.rs`.
 
 * Commit messages are Conventional Commits (`feat(mcp): ...`, `fix(server): ...`,
   `feat(crates): ...`); release-please writes the changelog from them.
+* Every commit needs a DCO sign-off (`git commit -s`); a GitHub app blocks pull requests with
+  unsigned commits. See [CONTRIBUTING.md](CONTRIBUTING.md).
 * Errors use one format everywhere: `{"error": {"code", "message"}}`, with messages written for a
   model to act on.
 * Keep the docs in step with the code: the READMEs, the scripting guide (`mcp/src/guide.ts`), the
