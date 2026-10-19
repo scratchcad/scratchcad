@@ -178,6 +178,19 @@ fn revolutions_sweeps_and_lofts() {
         Shape::loft(&[bottom.edges().first().unwrap(), top.edges().first().unwrap()], true)
             .unwrap();
     assert_close(from_edges.volume().unwrap(), 14.0 * PI / 3.0, 1e-4);
+    // Circles around four turns of a helix, which loft only without matching up their vertices.
+    let base = Shape::circle(v(4.5, 0.0, 0.0), v(0.0, 9.0 * PI, 3.0), 0.5).unwrap();
+    let coil: Vec<Shape> = (0..=48)
+        .map(|i| {
+            let t = i as f64 / 12.0;
+            let turned = base.rotate(DVec3::ZERO, DVec3::Z, t * 360.0).unwrap();
+            turned.translate(v(0.0, 0.0, t * 3.0)).unwrap()
+        })
+        .collect();
+    let length = 4.0 * (81.0 * PI * PI + 9.0f64).sqrt();
+    let wound = Shape::loft(&coil, true).unwrap();
+    assert!(wound.is_valid());
+    assert_close(wound.volume().unwrap(), PI * 0.25 * length, 0.01 * PI * 0.25 * length);
     err_contains(Shape::loft(&[bottom], true), "at least 2 sections");
     err_contains(Shape::loft(&[Shape::cube(1.0).unwrap(), top], true), "expected wire, got solid");
 }

@@ -450,9 +450,16 @@ impl Shape {
         Self::from_raw(ffi::topo_ds::cast_edge_to_shape(make.pin_mut().Edge()?))
     }
 
-    /// A full circle as a closed edge.
+    /// A full circle as a closed edge. It starts (its seam is) on the side of the center
+    /// toward +Z when the normal is within 60 degrees of horizontal, and toward +X otherwise, so
+    /// circles whose normals differ a little start in nearly the same place, and lofts through
+    /// them do not twist: circles along a helix around Z all start on top. (OpenCASCADE's own
+    /// choice jumps to the opposite side as the normal turns.)
     pub fn circle_edge(center: DVec3, normal: DVec3, radius: f64) -> Result<Self> {
-        Self::circle_edge_around(&*axis2(center, normal)?, radius)
+        let n = crate::math::normalize(normal)?;
+        let reference = if n.z.abs() < 0.5 { DVec3::Z } else { DVec3::X };
+        let plane = Plane::with_x_dir(center, n, reference)?;
+        Self::circle_edge_around(&*plane.to_ax2()?, radius)
     }
 
     fn circle_edge_around(axis: &ffi::gp::gp_Ax2, radius: f64) -> Result<Self> {
@@ -818,20 +825,30 @@ impl Shape {
         // OpenCASCADE 7.8 ignores the progress range of lofts, fillets and chamfers, so they
         // cannot be interrupted once started; at least do not start them after a cancel.
         crate::cancel::check()?;
-        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new(solid);
-        for section in sections {
-            let wire = match section.shape_type() {
-                ShapeType::Face => section.outer_wire()?,
-                ShapeType::Edge => Self::wire_from(std::slice::from_ref(section))?,
-                _ => section.clone(),
-            };
-            make.pin_mut().AddWire(wire.wire()?)?;
-        }
-        make.pin_mut().Build(&progress())?;
-        if !make.IsDone() {
-            return Err(failed("loft"));
-        }
-        Self::from_algorithm(make.pin_mut().Shape()?)
+        let wires = sections
+            .iter()
+            .map(|section| match section.shape_type() {
+                ShapeType::Face => section.outer_wire(),
+                ShapeType::Edge => Self::wire_from(std::slice::from_ref(section)),
+                _ => Ok(section.clone()),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // OpenCASCADE first makes the sections compatible, matching up their vertices so sections
+        // with different numbers of edges loft; that step fails on long runs of circles (more than
+        // two turns of a helix), which loft fine without it.
+        let attempt = |compatible: bool| -> Result<Self> {
+            let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new(solid);
+            make.pin_mut().CheckCompatibility(compatible);
+            for wire in &wires {
+                make.pin_mut().AddWire(wire.wire()?)?;
+            }
+            make.pin_mut().Build(&progress())?;
+            if !make.IsDone() {
+                return Err(failed("loft"));
+            }
+            Self::from_algorithm(make.pin_mut().Shape()?)
+        };
+        attempt(true).or_else(|_| attempt(false))
     }
 
     fn require_edges(&self, edges: &[Shape], what: &str) -> Result<()> {

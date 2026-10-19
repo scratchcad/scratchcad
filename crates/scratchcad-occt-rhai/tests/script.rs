@@ -695,3 +695,20 @@ fn bundled_examples_run() {
     }
     assert!(count >= 4);
 }
+
+#[test]
+fn circles_along_a_helix_start_on_top() {
+    // Their normals turn all the way around Z; OpenCASCADE's own choice of where each circle
+    // starts jumped to the opposite side, which twisted lofts through them.
+    for k in 0..24 {
+        let a = (k as f64 * 15.0).to_radians();
+        let center = v(10.0 * a.cos(), 10.0 * a.sin(), 0.0);
+        let normal = v(-a.sin(), a.cos(), 0.2);
+        let circle = Shape::circle(center, normal, 1.0).unwrap();
+        let start = circle.edges().first().unwrap().start_point().unwrap();
+        assert!(start.z - center.z > 0.95, "{k}: {start}");
+    }
+    // A circle in the XY plane still starts on +X.
+    let flat = Shape::circle(DVec3::ZERO, DVec3::Z, 2.0).unwrap();
+    assert_vec_close(flat.edges().first().unwrap().start_point().unwrap(), v(2.0, 0.0, 0.0), 1e-9);
+}
