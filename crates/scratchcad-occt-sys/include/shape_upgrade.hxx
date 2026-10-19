@@ -7,19 +7,32 @@
 // per span of a B-spline. Integrating each patch with a fixed number of Gauss points is then
 // accurate, where a whole B-spline face with many spans is not. Throws if the conversion fails,
 // rather than returning a shape that measures wrong.
+//
+// The surfaces and the curves are converted in two calls, checking each: one call does both in
+// two passes, and the curve pass resets the status, which hides a failed surface pass.
 inline std::unique_ptr<TopoDS_Shape> ShapeUpgrade_convert_to_bezier(const TopoDS_Shape &shape) {
   ShapeUpgrade_ShapeConvertToBezier convert(shape);
-  convert.Set2dConversion(Standard_True);
-  convert.Set3dConversion(Standard_True);
-  convert.SetSurfaceConversion(Standard_True);
+  auto check = [&convert]() {
+    if (convert.Status(ShapeExtend_FAIL) || convert.Result().IsNull()) {
+      throw Standard_Failure("could not split the shape into Bézier patches");
+    }
+  };
   convert.SetPlaneMode(Standard_True);
   convert.SetRevolutionMode(Standard_True);
   convert.SetExtrusionMode(Standard_True);
   convert.SetBSplineMode(Standard_True);
+
+  convert.SetSurfaceConversion(Standard_True);
+  convert.Set2dConversion(Standard_False);
+  convert.Set3dConversion(Standard_False);
   convert.Perform();
-  TopoDS_Shape result = convert.Result();
-  if (convert.Status(ShapeExtend_FAIL) || result.IsNull()) {
-    throw Standard_Failure("could not split the shape into Bézier patches");
-  }
-  return std::make_unique<TopoDS_Shape>(result);
+  check();
+
+  // Carries on from the surface pass's result, in the same context.
+  convert.SetSurfaceConversion(Standard_False);
+  convert.Set2dConversion(Standard_True);
+  convert.Set3dConversion(Standard_True);
+  convert.Perform(Standard_False);
+  check();
+  return std::make_unique<TopoDS_Shape>(convert.Result());
 }
