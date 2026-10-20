@@ -1,6 +1,6 @@
 # Parts
 
-923 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+1071 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -31,21 +31,27 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`construction`](construction) | 11 |
 | [`drawing_and_drafting`](drawing_and_drafting) | 18 |
 | [`electronics`](electronics) | 34 |
+| [`farm_and_livestock`](farm_and_livestock) | 15 |
 | [`fasteners`](fasteners) | 70 |
 | [`furniture_and_home_hardware`](furniture_and_home_hardware) | 42 |
 | [`garden_and_outdoor`](garden_and_outdoor) | 40 |
 | [`gears_and_power_transmission`](gears_and_power_transmission) | 28 |
 | [`hardware`](hardware) | 28 |
 | [`household`](household) | 28 |
+| [`hvac_electrical_and_solar`](hvac_electrical_and_solar) | 41 |
 | [`kitchen`](kitchen) | 40 |
 | [`lab_ware`](lab_ware) | 39 |
 | [`machine_elements`](machine_elements) | 40 |
 | [`marine_and_music`](marine_and_music) | 34 |
+| [`mechanisms`](mechanisms) | 18 |
 | [`medical_and_bathroom`](medical_and_bathroom) | 40 |
+| [`model_railway`](model_railway) | 16 |
+| [`musical_instruments`](musical_instruments) | 18 |
 | [`office_and_sports`](office_and_sports) | 24 |
 | [`optics_and_photography`](optics_and_photography) | 40 |
 | [`pets_audio_and_lighting`](pets_audio_and_lighting) | 15 |
 | [`plumbing`](plumbing) | 26 |
+| [`robotics_and_makers`](robotics_and_makers) | 40 |
 | [`sewing_and_crafts`](sewing_and_crafts) | 20 |
 | [`tools`](tools) | 40 |
 | [`toys_and_games`](toys_and_games) | 39 |
