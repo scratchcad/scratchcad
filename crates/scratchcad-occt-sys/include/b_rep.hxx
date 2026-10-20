@@ -21,6 +21,12 @@ inline std::unique_ptr<Handle_Geom_Curve> BRep_Tool_Curve(const TopoDS_Edge &edg
   return std::unique_ptr<Handle_Geom_Curve>(new opencascade::handle<Geom_Curve>(BRep_Tool::Curve(edge, first, last)));
 }
 
+// Whether `edge` is a seam of `face`: where a closed surface such as a cylinder meets itself, so
+// the edge bounds the face on both sides.
+inline bool BRep_Tool_IsClosed_on_face(const TopoDS_Edge &edge, const TopoDS_Face &face) {
+  return BRep_Tool::IsClosed(edge, face);
+}
+
 inline std::unique_ptr<gp_Pnt> BRep_Tool_Pnt(const TopoDS_Vertex &vertex) {
   return std::unique_ptr<gp_Pnt>(new gp_Pnt(BRep_Tool::Pnt(vertex)));
 }

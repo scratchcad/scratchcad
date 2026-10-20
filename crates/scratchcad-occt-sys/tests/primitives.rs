@@ -2,7 +2,7 @@ mod common;
 
 use common::{assert_close, dir, pnt, progress, unique_count, volume};
 use scratchcad_occt_sys::{
-    b_rep_builder_api as bb, b_rep_prim_api as prim, gp, top_abs::TopAbs_ShapeEnum,
+    b_rep, b_rep_builder_api as bb, b_rep_prim_api as prim, gp, top_abs::TopAbs_ShapeEnum, topo_ds,
 };
 use std::f64::consts::{PI, TAU};
 
@@ -77,4 +77,28 @@ fn prism_and_revolution_sweep_faces() {
     assert!(revol.IsDone());
     let expected = PI * (16.0 - 4.0) * 2.0;
     assert_close(volume(revol.pin_mut().Shape().unwrap()).abs(), expected, 1e-6);
+}
+
+#[test]
+fn seams_of_closed_faces() {
+    // A cylinder's side meets itself along one seam; its circles are not seams, and nothing on
+    // a box is.
+    let mut cylinder = prim::BRepPrimAPI_MakeCylinder_new(&z_axis(), 1.0, 2.0).unwrap();
+    let solid = topo_ds::TopoDS_Shape_to_owned(cylinder.pin_mut().Shape().unwrap());
+    let seams_of = |solid: &topo_ds::TopoDS_Shape| {
+        let faces = common::subshapes(solid, TopAbs_ShapeEnum::TopAbs_FACE);
+        common::subshapes(solid, TopAbs_ShapeEnum::TopAbs_EDGE)
+            .iter()
+            .filter(|edge| {
+                faces.iter().any(|face| {
+                    b_rep::BRep_Tool_IsClosed_on_face(
+                        topo_ds::TopoDS::Edge(edge).unwrap(),
+                        topo_ds::TopoDS::Face(face).unwrap(),
+                    )
+                })
+            })
+            .count()
+    };
+    assert_eq!(seams_of(&solid), 1);
+    assert_eq!(seams_of(&common::make_box(1.0, 1.0, 1.0)), 0);
 }
