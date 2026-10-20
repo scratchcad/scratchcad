@@ -1,10 +1,10 @@
 // 5015 blower part-cooling duct: 20 x 15 mm inlet lofted down and around to a 30 x 3 mm slot outlet, 1.2 mm walls
 let inlet_w = 20.0; // [15.0, 25.0] Inlet width (mm)
-let inlet_h = 15.0; // [10.0, 20.0] Inlet height (mm)
+const inlet_h = 15.0;
 let outlet_w = 30.0; // [15.0, 50.0] Outlet width (mm)
-let outlet_h = 3.0; // [2.0, 6.0] Outlet height (mm)
-let drop = 25.0; // [15.0, 40.0] Drop (mm)
-let wall = 1.2; // [0.8, 2.0] Wall thickness (mm)
+const outlet_h = 3.0;
+const drop = 25.0;
+const wall = 1.2;
 let a = rect(plane([0, 0, drop], "Z"), inlet_w, inlet_h);
 let b = rect(plane([0, 4.0, drop * 0.5], [0, 0.3, 1]), inlet_w * 1.1, inlet_h * 0.6);
 let c = rect(plane([0, 12.0, 0], [0, 1, 0.5]), outlet_w, outlet_h);

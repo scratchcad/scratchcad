@@ -1,6 +1,6 @@
 // 6204 deep groove ball bearing: 20 x 47 x 14 mm, 8 balls of 7.94 mm, races with ball grooves
 let bore = 20.0; // [10.0, 30.0] Bore (mm)
-let outer = 47.0; // [30.0, 62.0] Outside diameter (mm)
+let outer = 47.0; // [36.8, 62.0] Outside diameter (mm)
 let width = 14.0; // [9.0, 16.0] Width (mm)
 let ball_d = 7.94; // [5.0, 10.0] Ball diameter (mm)
 let balls = 8; // [6, 12] Number of balls

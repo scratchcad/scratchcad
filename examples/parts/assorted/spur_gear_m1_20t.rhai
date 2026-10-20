@@ -1,6 +1,6 @@
 // Spur gear, module 1, 20 teeth, 20 degree pressure angle
 let gear_module = 1.0; // [0.5, 3.0] Module (mm)
-let teeth = 20; // [8, 80] Number of teeth
+let teeth = 20; // [8, 42] Number of teeth
 let pressure_angle = 20.0; // [14.5, 25.0] Pressure angle (degrees)
 let face_width = 10.0; // [3.0, 30.0] Face width (mm)
 let bore = 5.0; // [2.0, 12.0] Bore (mm)

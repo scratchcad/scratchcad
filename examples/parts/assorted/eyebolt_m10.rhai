@@ -1,7 +1,7 @@
 // DIN 580 M10 lifting eye bolt
-let ring_od = 45.0; // [30, 60] Ring outside diameter (mm)
+let ring_od = 45.0; // [30.0, 54.0] Ring outside diameter (mm)
 let eye_d = 25.0; // [15, 40] Eye diameter (mm)
-let height = 45.0; // [30, 60] Overall height above the collar face (mm)
+let height = 45.0; // [39.6, 60.0] Overall height above the collar face (mm)
 let collar_d = 25.0; // [18, 35] Collar diameter (mm)
 let collar_h = 8.0; // [5, 12] Collar height (mm)
 let shank_length = 17.0; // [10, 30] Thread length (mm)

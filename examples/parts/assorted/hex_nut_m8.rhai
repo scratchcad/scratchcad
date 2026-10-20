@@ -1,7 +1,7 @@
 // DIN 934 M8 hex nut
-let diameter = 8.0; // [3.0, 20.0] Thread diameter (mm)
+let diameter = 8.0; // [3.0, 15.2] Thread diameter (mm)
 let thread_pitch = 1.25; // [0.5, 2.5] Thread pitch (mm)
-let across_flats = 13.0; // [5.5, 30.0] Width across flats (mm)
+let across_flats = 13.0; // [8.5, 30.0] Width across flats (mm)
 let height = 6.5; // [2.0, 16.0] Height (mm)
 let tan30 = (30.0 * PI() / 180.0).tan();
 let r_corner = across_flats / sqrt(3.0);

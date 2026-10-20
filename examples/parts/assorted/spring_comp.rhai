@@ -1,8 +1,8 @@
 // Compression spring with closed and ground ends
 let wire_d = 1.0; // [0.5, 2.0] Wire diameter (mm)
-let outer_d = 10.0; // [5.0, 20.0] Outside diameter (mm)
-let free_length = 30.0; // [10.0, 60.0] Free length (mm)
-let active = 8; // [3, 15] Active coils
+let outer_d = 10.0; // [7.0, 20.0] Outside diameter (mm)
+let free_length = 30.0; // [10.0, 48.0] Free length (mm)
+let active = 8; // [5, 15] Active coils
 let r = (outer_d - wire_d) / 2.0;
 let dead_pitch = wire_d * 1.05;
 let total = active + 2;

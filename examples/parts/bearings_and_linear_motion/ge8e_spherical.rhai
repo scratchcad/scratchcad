@@ -1,5 +1,5 @@
 // GE8E spherical plain bearing: 8 mm bore, 16 mm OD, inner ring 8 mm wide, outer ring 5 mm wide
-let bore = 8.0; // [5.0, 30.0] Bore (mm)
+let bore = 8.0; // [5.0, 21.2] Bore (mm)
 let outer = 16.0; // [10.0, 47.0] Outside diameter (mm)
 let inner_w = 8.0; // [5.0, 22.0] Inner ring width (mm)
 let outer_w = 5.0; // [3.0, 18.0] Outer ring width (mm)

@@ -1,9 +1,9 @@
 // ISO 4762 M6 x 20 socket head cap screw
 // # Head
 let head_d = 10.0; // [5.5, 16.0] Head diameter (mm)
-let head_h = 6.0; // [3.0, 10.0] Head height (mm)
+let head_h = 6.0; // [5.0, 10.0] Head height (mm)
 let socket = 5.0; // [2.5, 8.0] Hex socket size (mm)
-let socket_depth = 3.0; // [1.5, 6.0] Socket depth (mm)
+let socket_depth = 3.0; // [1.5, 3.5] Socket depth (mm)
 // # Shank
 let diameter = 6.0; // [3.0, 10.0] Thread diameter (mm)
 let length = 20.0; // [8.0, 60.0] Length under the head (mm)

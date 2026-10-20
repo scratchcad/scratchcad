@@ -1,5 +1,5 @@
 // 7200 angular contact ball bearing: 10 x 30 x 9 mm, 40 degree contact, outer ring relieved on one side
-let bore = 10.0; // [8.0, 30.0] Bore (mm)
+let bore = 10.0; // [8.0, 22.0] Bore (mm)
 let outer = 30.0; // [22.0, 62.0] Outside diameter (mm)
 let width = 9.0; // [7.0, 16.0] Width (mm)
 let balls = 9; // [7, 14] Number of balls

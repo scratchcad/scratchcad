@@ -1,7 +1,7 @@
 // LM8UU linear ball bearing
 let bore = 8.0; // [6.0, 12.0] Bore (mm)
 let outer = 15.0; // [12.0, 21.0] Outside diameter (mm)
-let length = 24.0; // [17.0, 30.0] Length (mm)
+let length = 24.0; // [19.8, 30.0] Length (mm)
 let groove_spacing = 17.5; // [10.0, 20.0] Distance between ring grooves (mm)
 let groove_width = 1.1; // [0.8, 1.5] Ring groove width (mm)
 let groove_d = 14.3; // [11.0, 20.0] Ring groove diameter (mm)
