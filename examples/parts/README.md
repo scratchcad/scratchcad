@@ -1,6 +1,6 @@
 # Parts
 
-1817 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+1907 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -54,12 +54,14 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`eu_electrical_install`](eu_electrical_install) | 6 |
 | [`farm_and_livestock`](farm_and_livestock) | 15 |
 | [`fasteners`](fasteners) | 70 |
+| [`fire_and_emergency`](fire_and_emergency) | 5 |
 | [`furniture_and_home_hardware`](furniture_and_home_hardware) | 42 |
 | [`garage_and_motorcycle`](garage_and_motorcycle) | 41 |
 | [`garage_storage`](garage_storage) | 8 |
 | [`garden_and_outdoor`](garden_and_outdoor) | 40 |
 | [`gears_and_power_transmission`](gears_and_power_transmission) | 28 |
 | [`general_aviation`](general_aviation) | 13 |
+| [`greenhouse_and_growing`](greenhouse_and_growing) | 40 |
 | [`ham_radio`](ham_radio) | 8 |
 | [`hardware`](hardware) | 28 |
 | [`home_decor`](home_decor) | 14 |
@@ -71,6 +73,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`jewellery_watches_and_fashion`](jewellery_watches_and_fashion) | 40 |
 | [`joinery_and_woodwork`](joinery_and_woodwork) | 17 |
 | [`kitchen`](kitchen) | 40 |
+| [`kitchen_storage`](kitchen_storage) | 5 |
 | [`lab_ware`](lab_ware) | 39 |
 | [`leatherworking`](leatherworking) | 6 |
 | [`lighting_fixtures`](lighting_fixtures) | 10 |
@@ -79,6 +82,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`mechanisms`](mechanisms) | 18 |
 | [`medical_and_bathroom`](medical_and_bathroom) | 40 |
 | [`microscopy`](microscopy) | 7 |
+| [`mobility_and_accessibility`](mobility_and_accessibility) | 40 |
 | [`model_railway`](model_railway) | 16 |
 | [`model_rocketry`](model_rocketry) | 13 |
 | [`musical_instruments`](musical_instruments) | 18 |
