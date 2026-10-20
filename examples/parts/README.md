@@ -1,6 +1,6 @@
 # Parts
 
-2653 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2734 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -98,6 +98,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`jewellery_making_tools`](jewellery_making_tools) | 6 |
 | [`jewellery_watches_and_fashion`](jewellery_watches_and_fashion) | 40 |
 | [`joinery_and_woodwork`](joinery_and_woodwork) | 17 |
+| [`karting_and_motorsport`](karting_and_motorsport) | 41 |
 | [`kitchen`](kitchen) | 40 |
 | [`kitchen_storage`](kitchen_storage) | 5 |
 | [`lab_automation_and_printer_upgrades`](lab_automation_and_printer_upgrades) | 40 |
@@ -120,6 +121,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`office_furniture`](office_furniture) | 10 |
 | [`optics_and_photography`](optics_and_photography) | 40 |
 | [`orchard_and_fruit`](orchard_and_fruit) | 6 |
+| [`outboard_and_marine_engine`](outboard_and_marine_engine) | 40 |
 | [`outdoor_furniture`](outdoor_furniture) | 6 |
 | [`pa_speaker_hardware`](pa_speaker_hardware) | 6 |
 | [`packaging_and_containers`](packaging_and_containers) | 40 |
