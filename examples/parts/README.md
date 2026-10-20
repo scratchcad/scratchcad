@@ -1,6 +1,6 @@
 # Parts
 
-2983 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+3071 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -61,6 +61,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`clocks`](clocks) | 10 |
 | [`coffee_and_tea`](coffee_and_tea) | 6 |
 | [`commercial_kitchen_spares`](commercial_kitchen_spares) | 40 |
+| [`commercial_washroom_and_janitorial`](commercial_washroom_and_janitorial) | 41 |
 | [`computer_and_desk`](computer_and_desk) | 19 |
 | [`concrete_formwork`](concrete_formwork) | 6 |
 | [`construction`](construction) | 11 |
@@ -68,6 +69,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`cubesat_and_space`](cubesat_and_space) | 8 |
 | [`darkroom`](darkroom) | 6 |
 | [`desk_organisers`](desk_organisers) | 40 |
+| [`desk_toys_and_puzzles`](desk_toys_and_puzzles) | 6 |
 | [`din_rail_and_cabinet_hardware`](din_rail_and_cabinet_hardware) | 41 |
 | [`dog_feeding_and_toys`](dog_feeding_and_toys) | 6 |
 | [`drawing_and_drafting`](drawing_and_drafting) | 18 |
@@ -108,6 +110,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`hvac_ductwork_metric`](hvac_ductwork_metric) | 41 |
 | [`hvac_electrical_and_solar`](hvac_electrical_and_solar) | 41 |
 | [`hydraulic_fittings_jic`](hydraulic_fittings_jic) | 6 |
+| [`hydroponics_and_aquaponics`](hydroponics_and_aquaponics) | 41 |
 | [`ice_hockey_and_skating`](ice_hockey_and_skating) | 6 |
 | [`industrial_automation`](industrial_automation) | 10 |
 | [`industrial_safety_and_ppe`](industrial_safety_and_ppe) | 42 |
