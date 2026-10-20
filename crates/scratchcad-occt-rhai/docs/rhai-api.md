@@ -138,6 +138,11 @@ others, such as servers:
   (lofts, sweeps, splines) is measured on a copy split into Bézier patches, to about 1e-7 of
   the result; integrating its B-spline faces directly is off by percent. That split is the
   slow part, so `shape.mass_properties()` returns all three from one split.
+* **Notes.** A boolean can succeed and still return an invalid shape (where faces only touch or
+  nearly coincide), which later operations may mangle or drop without an error, leaving a final
+  shape that looks fine. Booleans that raise OpenCASCADE warnings check their result, and record an
+  invalid one as a note, placed at its line in the script when called from one. Take them after a
+  script with `take_notes()`, to show them to whoever wrote it. Notes are kept per thread.
 * **Console output.** OpenCASCADE prints to stdout. `set_message_handler(level, |level, text| ..)`
   receives its messages instead; `set_occt_messages(false)` sends only failures, to stderr.
 * **Threads.** `Shape` is neither `Send` nor `Sync`: OpenCASCADE shares sub-shapes between shapes

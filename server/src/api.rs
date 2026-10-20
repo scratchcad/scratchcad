@@ -172,7 +172,9 @@ impl ValidateRequest {
     pub(crate) fn run(self, ctx: &JobCtx) -> Result<Output, ApiError> {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
-        let (shape, warnings) = measure::summarize(&c.shape, self.mass_properties)?;
+        let (shape, shape_warnings) = measure::summarize(&c.shape, self.mass_properties)?;
+        let mut warnings = c.warnings;
+        warnings.extend(shape_warnings);
         let response = ValidateResponse {
             shape,
             output: c.output,
@@ -256,7 +258,7 @@ impl Raster2dRequest {
             self.center.map(DVec2::from_array),
             self.half_size,
         );
-        let mut warnings = vec![];
+        let mut warnings = c.warnings.clone();
         let pixel = 2.0 * view.half_size / f64::from(w.max(h));
         let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
         let segments = if bbox.min.z > 0.0 || bbox.max.z < 0.0 {
@@ -365,7 +367,8 @@ impl Raster3dRequest {
         let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
         ctx.set_stage(Stage::Meshing);
         let max_triangles = ctx.settings.max_mesh_triangles;
-        let scene = scene(&c.shape, tolerance, max_triangles, self.edges)?;
+        let mut scene = scene(&c.shape, tolerance, max_triangles, self.edges)?;
+        scene.warnings.splice(0..0, c.warnings.iter().cloned());
         ctx.set_stage(Stage::Rendering);
         let view = View3d {
             width: w,
@@ -495,12 +498,14 @@ impl ExportRequest {
     pub(crate) fn run(self, format: ExportFormat, ctx: &JobCtx) -> Result<Output, ApiError> {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
-        let (bytes, mesh, warnings) = if format.is_mesh() {
+        let (bytes, mesh, format_warnings) = if format.is_mesh() {
             export_mesh(ctx, &c.shape, format, self.tolerance)?
         } else {
             ctx.set_stage(Stage::Exporting);
             (export::exact(&c.shape, format)?, None, vec![])
         };
+        let mut warnings = c.warnings;
+        warnings.extend(format_warnings);
         let max = ctx.settings.max_export_bytes;
         if bytes.len() > max {
             let hint = if format.is_mesh() {
