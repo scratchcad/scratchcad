@@ -1,6 +1,6 @@
 # Parts
 
-2576 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2590 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -82,6 +82,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`geology_and_field_science`](geology_and_field_science) | 8 |
 | [`golf`](golf) | 8 |
 | [`greenhouse_and_growing`](greenhouse_and_growing) | 40 |
+| [`guitar_hardware`](guitar_hardware) | 7 |
 | [`ham_radio`](ham_radio) | 8 |
 | [`hardware`](hardware) | 28 |
 | [`hobby_electronics_enclosures`](hobby_electronics_enclosures) | 41 |
@@ -152,6 +153,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`trailers_and_towing`](trailers_and_towing) | 7 |
 | [`tripod_accessories`](tripod_accessories) | 5 |
 | [`vacuum_cleaner_spares`](vacuum_cleaner_spares) | 5 |
+| [`wall_and_ceiling_fixings`](wall_and_ceiling_fixings) | 7 |
 | [`watersports`](watersports) | 9 |
 | [`weaving_and_spinning`](weaving_and_spinning) | 6 |
 | [`wildlife`](wildlife) | 5 |
