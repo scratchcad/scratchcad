@@ -1,7 +1,7 @@
 // Plastic drum bung plug, 2 inch (56 x 4 buttress thread): 64 mm flange 6 mm thick with a gasket groove and a 40 x 8 mm wrench bar, 16 mm hollow threaded plug with a 4 mm pitch buttress thread on a 51.6 mm root
 let flange_diameter = 64.0; // [58.0, 75.0] Flange diameter (mm)
 let flange_thickness = 6.0; // [4.0, 10.0] Flange thickness (mm)
-let plug_length = 16.0; // [10.0, 25.0] Threaded length (mm)
+const plug_length = 16.0;
 let wall = 3.0; // [2.0, 5.0] Plug wall (mm)
 let bar_height = 5.0; // [3.0, 10.0] Wrench bar height (mm)
 const pitch = 4.0;

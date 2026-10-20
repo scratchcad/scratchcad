@@ -1,6 +1,6 @@
 // Medicine dosing cup, 30 ml: conical cup 40 mm across the top, 30 mm at the base, 36 mm tall, 1 mm wall, with raised graduation rings at 5, 10, 15, 20 and 25 ml
-let top_diameter = 40.0; // [30.0, 60.0] Top diameter (mm)
-let bottom_diameter = 30.0; // [20.0, 50.0] Bottom diameter (mm)
+let top_diameter = 40.0; // [34.0, 60.0] Top diameter (mm)
+let bottom_diameter = 30.0; // [20.0, 36.0] Bottom diameter (mm)
 let height = 36.0; // [20.0, 50.0] Cup height (mm)
 let wall = 1.0; // [0.7, 2.0] Wall thickness (mm)
 let step_ml = 5.0; // [1.0, 10.0] Graduation step (ml)

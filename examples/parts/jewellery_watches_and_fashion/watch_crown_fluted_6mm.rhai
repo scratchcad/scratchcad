@@ -1,7 +1,7 @@
 // Fluted watch crown, 6 mm diameter x 3.6 mm tall: domed top, 20 grip flutes, 3 mm recess for the 2.5 mm tube and a 0.9 mm (tap 0.9) stem hole
 let crown_diameter = 6.0; // [4.0, 9.0] Crown diameter (mm)
 let crown_height = 3.6; // [2.5, 5.0] Crown height (mm)
-let flutes = 20; // [0, 40] Grip flutes
+let flutes = 20; // [0, 32] Grip flutes
 let recess_diameter = 3.0; // [2.0, 4.0] Tube recess diameter (mm)
 let recess_depth = 2.0; // [1.0, 2.5] Tube recess depth (mm)
 let stem_hole = 0.9; // [0.6, 1.2] Stem hole diameter (mm)

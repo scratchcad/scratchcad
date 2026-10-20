@@ -1,6 +1,6 @@
 // Screw-in football boot stud: 20 mm base washer 2 mm, 15 mm tapering to 10 mm cone 13 mm tall with a rounded tip, 5 mm threaded stub 7 mm long, two 2 mm spanner holes 6 mm apart in the tip
 let base_d = 20.0; // [15.0, 25.0] Base washer diameter (mm)
-let stud_d = 15.0; // [10.0, 18.0] Stud diameter at the base (mm)
+let stud_d = 15.0; // [12.0, 18.0] Stud diameter at the base (mm)
 let tip_d = 10.0; // [6.0, 14.0] Tip diameter (mm)
 let stud_height = 13.0; // [8.0, 20.0] Stud height (mm)
 let thread_d = 5.0; // [4.0, 8.0] Thread stub diameter (mm)

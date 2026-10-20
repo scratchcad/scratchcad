@@ -2,7 +2,7 @@
 let cap_diameter = 66.4; // [50.0, 80.0] Cap diameter (mm)
 let height = 42.0; // [25.0, 70.0] Cap height (mm)
 let wall = 1.2; // [0.8, 2.0] Wall thickness (mm)
-let dome = 3.0; // [0.0, 8.0] Top dome height (mm)
+let dome = 3.0; // [1.2, 8.0] Top dome height (mm)
 let ro = cap_diameter / 2.0;
 let ri = ro - wall;
 let hs = height - dome;

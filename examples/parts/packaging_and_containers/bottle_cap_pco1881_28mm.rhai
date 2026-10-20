@@ -1,6 +1,6 @@
 // Screw cap for a 28 mm PCO 1881 neck: 30.6 mm diameter, 14 mm tall skirt, 1.2 mm top with a bore-seal plug ring, internal 2.7 mm pitch thread (25.9 mm crest), 60 grip flutes and a 3.5 mm tamper band on eight bridges
 let cap_diameter = 30.6; // [29.0, 34.0] Cap diameter (mm)
-let skirt_height = 14.0; // [10.0, 18.0] Skirt height (mm)
+let skirt_height = 14.0; // [11.6, 18.0] Skirt height (mm)
 let top_thickness = 1.2; // [0.8, 2.0] Top thickness (mm)
 let flutes = 60; // [0, 90] Number of grip flutes
 let band_height = 3.5; // [0.0, 5.0] Tamper band height (mm)

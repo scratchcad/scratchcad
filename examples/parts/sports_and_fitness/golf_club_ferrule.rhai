@@ -1,8 +1,8 @@
 // Iron golf club ferrule for 0.355 in (9.0 mm) tip shafts: 25 mm long, 9.0 mm bore, 13.5 mm base tapering to 9.9 mm at the top, two 0.4 mm trim rings
-let bore_d = 9.0; // [8.4, 9.4] Shaft bore (mm)
+let bore_d = 9.0; // [8.4, 9.2] Shaft bore (mm)
 let length = 25.0; // [15.0, 35.0] Length (mm)
 let base_d = 13.5; // [11.0, 16.0] Base diameter (mm)
-let top_d = 9.9; // [9.6, 12.0] Top diameter (mm)
+let top_d = 9.9; // [9.7, 12.0] Top diameter (mm)
 let rings = 2; // [0, 4] Number of trim rings
 let rt = max(top_d, bore_d + 0.6) / 2.0;
 let rb = max(base_d, top_d) / 2.0;

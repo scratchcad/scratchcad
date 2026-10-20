@@ -1,6 +1,6 @@
 // Engine oil dipstick handle: 36 x 26 mm loop 5 mm thick with a 22 x 12 mm finger hole, 10 mm socket 18 mm long with a 4.5 mm bore for the dipstick tube, O-ring groove
 let loop_w = 36.0; // [28.0, 50.0] Loop width (mm)
-let loop_h = 26.0; // [20.0, 40.0] Loop height (mm)
+let loop_h = 26.0; // [20.0, 34.4] Loop height (mm)
 let loop_t = 5.0; // [3.0, 8.0] Loop thickness (mm)
 let rim = 7.0; // [4.0, 10.0] Rim width (mm)
 let socket_d = 10.0; // [8.0, 14.0] Socket diameter (mm)

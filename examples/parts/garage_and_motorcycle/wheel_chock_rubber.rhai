@@ -2,7 +2,7 @@
 let length = 250.0; // [180.0, 350.0] Length (mm)
 let width = 120.0; // [90.0, 180.0] Width (mm)
 let height = 125.0; // [80.0, 180.0] Height (mm)
-let face_depth = 20.0; // [0.0, 30.0] Tyre face hollow depth (mm)
+let face_depth = 20.0; // [8.0, 30.0] Tyre face hollow depth (mm)
 let ribs = 6; // [3, 10] Number of base ribs
 const rib_depth = 5.0;
 // the concave face runs from the toe (0, 15) to (0.55 L, H); its middle is pushed into the body

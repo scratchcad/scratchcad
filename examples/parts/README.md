@@ -1,6 +1,6 @@
 # Parts
 
-1805 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+1817 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -33,6 +33,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`bathroom_and_cleaning`](bathroom_and_cleaning) | 42 |
 | [`bbq_and_grill`](bbq_and_grill) | 10 |
 | [`bearings_and_linear_motion`](bearings_and_linear_motion) | 29 |
+| [`beauty_and_grooming`](beauty_and_grooming) | 6 |
 | [`beekeeping_and_fishing`](beekeeping_and_fishing) | 14 |
 | [`blinds_and_curtains`](blinds_and_curtains) | 15 |
 | [`books_and_reading`](books_and_reading) | 10 |
@@ -45,6 +46,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`construction`](construction) | 11 |
 | [`cubesat_and_space`](cubesat_and_space) | 8 |
 | [`drawing_and_drafting`](drawing_and_drafting) | 18 |
+| [`drones_and_rc_2`](drones_and_rc_2) | 6 |
 | [`ebike_and_scooter`](ebike_and_scooter) | 10 |
 | [`electronics`](electronics) | 34 |
 | [`electronics_bench`](electronics_bench) | 14 |

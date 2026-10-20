@@ -1,5 +1,5 @@
 // Pendant bail for a 5 mm chain or cord: rounded loop 7 x 9 mm outside, 3 x 5 mm opening, 2.5 mm thick, with a 1.2 mm thick tab and a 1.5 mm jump-ring hole below
-let opening_width = 3.0; // [2.0, 6.0] Opening width (mm)
+let opening_width = 3.0; // [2.0, 4.8] Opening width (mm)
 let opening_height = 5.0; // [3.0, 8.0] Opening height (mm)
 let wall = 2.0; // [1.0, 3.0] Loop wall (mm)
 let thickness = 2.5; // [1.5, 4.0] Loop thickness (mm)

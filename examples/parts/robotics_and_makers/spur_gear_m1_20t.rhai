@@ -1,5 +1,5 @@
 // Involute spur gear, module 1, 20 teeth, 20 degree pressure angle: 20 mm pitch diameter, 22 mm outside, 8 mm face width, 10 mm hub 6 mm long, 5 mm bore with a 2 mm keyway and M3 set screw
-let teeth = 20; // [10, 60] Number of teeth
+let teeth = 20; // [10, 44] Number of teeth
 let module_size = 1.0; // [0.5, 3.0] Module (mm)
 let face_w = 8.0; // [3.0, 20.0] Face width (mm)
 let bore = 5.0; // [2.0, 12.0] Bore diameter (mm)

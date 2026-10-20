@@ -1,6 +1,6 @@
 // Round two-wheel robot chassis plate: 150 mm diameter, 3 mm, two 28 x 68 mm wheel cut-outs for 65 mm wheels, TT motor mounting holes, front and rear ball-caster holes, 20 mm wire pass holes
-let dia = 150.0; // [100.0, 250.0] Plate diameter (mm)
-let t = 3.0; // [2.0, 6.0] Plate thickness (mm)
+let dia = 150.0; // [145.0, 250.0] Plate diameter (mm)
+let t = 3.0; // [2.0, 4.8] Plate thickness (mm)
 let wheel_w = 28.0; // [15.0, 40.0] Wheel slot width (mm)
 let wheel_len = 68.0; // [40.0, 100.0] Wheel slot length (mm)
 let r = dia / 2.0;

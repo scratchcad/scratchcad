@@ -1,7 +1,7 @@
 // Mounting block for an SG90 micro servo: 22.8 x 12.4 mm pocket, ledge for the 32.5 mm tab flange, two M2 pilot holes 27.6 mm apart, base plate with two M3 screw slots
-let pocket_l = 22.8; // [20.0, 26.0] Servo body length (mm)
+let pocket_l = 22.8; // [20.0, 24.7] Servo body length (mm)
 let pocket_w = 12.4; // [11.0, 14.0] Servo body width (mm)
-let ledge_h = 16.0; // [10.0, 22.0] Height of the tab ledge (mm)
+let ledge_h = 16.0; // [12.4, 22.0] Height of the tab ledge (mm)
 let base_len = 50.0; // [40.0, 70.0] Base plate length (mm)
 const wall = 3.0;
 const hole_spacing = 27.6;

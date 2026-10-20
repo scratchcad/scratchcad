@@ -1,6 +1,6 @@
 // Motorcycle kickstand puck for soft ground: 90 mm disc 10 mm thick, 42 x 26 mm foot pocket 5 mm deep, base grip grooves, lanyard tab with a 6 mm hole
 let diameter = 90.0; // [60.0, 130.0] Diameter (mm)
-let thickness = 10.0; // [6.0, 16.0] Thickness (mm)
+let thickness = 10.0; // [7.6, 16.0] Thickness (mm)
 let pocket_length = 42.0; // [25.0, 60.0] Foot pocket length (mm)
 let pocket_width = 26.0; // [15.0, 40.0] Foot pocket width (mm)
 let pocket_depth = 5.0; // [2.0, 8.0] Pocket depth (mm)

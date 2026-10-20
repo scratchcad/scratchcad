@@ -1,6 +1,6 @@
 // Tie rod end ball joint dust boot: 30 mm base bead for a 22 mm socket, 22 mm tall bellied rubber body 2 mm thick, 12 mm stud neck
-let base_d = 30.0; // [22.0, 40.0] Base bead diameter (mm)
-let base_id = 22.0; // [16.0, 32.0] Base opening (mm)
+let base_d = 30.0; // [28.0, 40.0] Base bead diameter (mm)
+let base_id = 22.0; // [16.0, 25.0] Base opening (mm)
 let height = 22.0; // [15.0, 32.0] Height (mm)
 let neck_id = 12.0; // [8.0, 18.0] Stud neck opening (mm)
 let wall = 2.0; // [1.5, 3.0] Wall thickness (mm)

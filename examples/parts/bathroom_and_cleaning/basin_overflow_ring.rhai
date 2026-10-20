@@ -1,6 +1,6 @@
 // Basin overflow ring insert: 30 mm flange 2 mm thick, 22 mm opening, 8 mm sleeve with 3 snap tabs for a 24 mm overflow hole
 let flange_d = 30.0; // [24.0, 40.0] Flange diameter (mm)
-let hole_d = 24.0; // [18.0, 32.0] Overflow hole in the basin (mm)
+let hole_d = 24.0; // [18.0, 28.8] Overflow hole in the basin (mm)
 let sleeve = 8.0; // [5.0, 12.0] Sleeve depth (mm)
 let wall = 1.2; // [0.8, 2.0] Sleeve wall (mm)
 let ro = hole_d / 2.0 - 0.2;
