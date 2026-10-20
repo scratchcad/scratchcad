@@ -1,6 +1,6 @@
 # Parts
 
-829 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+923 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -22,10 +22,14 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 |---|---|
 | [`3d_printer_parts`](3d_printer_parts) | 36 |
 | [`aerospace_drones_and_rc`](aerospace_drones_and_rc) | 39 |
+| [`aquarium_and_irrigation`](aquarium_and_irrigation) | 18 |
 | [`assorted`](assorted) | 30 |
 | [`automotive_and_bicycle`](automotive_and_bicycle) | 37 |
 | [`bearings_and_linear_motion`](bearings_and_linear_motion) | 29 |
+| [`camping_and_hiking`](camping_and_hiking) | 19 |
+| [`computer_and_desk`](computer_and_desk) | 19 |
 | [`construction`](construction) | 11 |
+| [`drawing_and_drafting`](drawing_and_drafting) | 18 |
 | [`electronics`](electronics) | 34 |
 | [`fasteners`](fasteners) | 70 |
 | [`furniture_and_home_hardware`](furniture_and_home_hardware) | 42 |
@@ -42,6 +46,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`optics_and_photography`](optics_and_photography) | 40 |
 | [`pets_audio_and_lighting`](pets_audio_and_lighting) | 15 |
 | [`plumbing`](plumbing) | 26 |
+| [`sewing_and_crafts`](sewing_and_crafts) | 20 |
 | [`tools`](tools) | 40 |
 | [`toys_and_games`](toys_and_games) | 39 |
 
