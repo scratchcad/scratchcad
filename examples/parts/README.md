@@ -1,6 +1,6 @@
 # Parts
 
-1582 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+1600 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -33,6 +33,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`bearings_and_linear_motion`](bearings_and_linear_motion) | 29 |
 | [`beekeeping_and_fishing`](beekeeping_and_fishing) | 14 |
 | [`blinds_and_curtains`](blinds_and_curtains) | 15 |
+| [`books_and_reading`](books_and_reading) | 10 |
 | [`camping_and_hiking`](camping_and_hiking) | 19 |
 | [`classroom_and_science_kits`](classroom_and_science_kits) | 12 |
 | [`clocks`](clocks) | 10 |
@@ -47,6 +48,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`fasteners`](fasteners) | 70 |
 | [`furniture_and_home_hardware`](furniture_and_home_hardware) | 42 |
 | [`garage_and_motorcycle`](garage_and_motorcycle) | 41 |
+| [`garage_storage`](garage_storage) | 8 |
 | [`garden_and_outdoor`](garden_and_outdoor) | 40 |
 | [`gears_and_power_transmission`](gears_and_power_transmission) | 28 |
 | [`general_aviation`](general_aviation) | 13 |
