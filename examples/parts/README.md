@@ -1,6 +1,6 @@
 # Parts
 
-2312 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2328 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -127,6 +127,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`smart_home`](smart_home) | 7 |
 | [`sports_and_fitness`](sports_and_fitness) | 40 |
 | [`stoves_and_sauna`](stoves_and_sauna) | 8 |
+| [`studio_audio_hardware`](studio_audio_hardware) | 8 |
 | [`surveying_and_layout`](surveying_and_layout) | 6 |
 | [`tabletop_gaming`](tabletop_gaming) | 8 |
 | [`theatre_film_and_av`](theatre_film_and_av) | 40 |
@@ -139,6 +140,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`weaving_and_spinning`](weaving_and_spinning) | 6 |
 | [`wildlife`](wildlife) | 5 |
 | [`window_hardware`](window_hardware) | 6 |
+| [`winemaking_and_cellar`](winemaking_and_cellar) | 8 |
 | [`wooden_train_set`](wooden_train_set) | 7 |
 | [`workshop_jigs`](workshop_jigs) | 40 |
 
