@@ -1,6 +1,6 @@
 # Parts
 
-2328 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2343 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -63,6 +63,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`farm_and_livestock`](farm_and_livestock) | 15 |
 | [`fasteners`](fasteners) | 70 |
 | [`fire_and_emergency`](fire_and_emergency) | 5 |
+| [`flooring_and_tiling`](flooring_and_tiling) | 7 |
 | [`furniture_and_home_hardware`](furniture_and_home_hardware) | 42 |
 | [`furniture_repair`](furniture_repair) | 5 |
 | [`garage_and_motorcycle`](garage_and_motorcycle) | 41 |
@@ -71,6 +72,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`gears_and_power_transmission`](gears_and_power_transmission) | 28 |
 | [`general_aviation`](general_aviation) | 13 |
 | [`geology_and_field_science`](geology_and_field_science) | 8 |
+| [`golf`](golf) | 8 |
 | [`greenhouse_and_growing`](greenhouse_and_growing) | 40 |
 | [`ham_radio`](ham_radio) | 8 |
 | [`hardware`](hardware) | 28 |
