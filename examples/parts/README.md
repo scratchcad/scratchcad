@@ -1,6 +1,6 @@
 # Parts
 
-3077 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+3157 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -83,6 +83,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`events_and_conferences`](events_and_conferences) | 6 |
 | [`eyewear`](eyewear) | 6 |
 | [`farm_and_livestock`](farm_and_livestock) | 15 |
+| [`farm_machinery_spares`](farm_machinery_spares) | 40 |
 | [`fasteners`](fasteners) | 70 |
 | [`fencing_and_sheds`](fencing_and_sheds) | 7 |
 | [`fibre_and_telecom`](fibre_and_telecom) | 6 |
@@ -153,6 +154,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`packaging_and_containers`](packaging_and_containers) | 40 |
 | [`percussion`](percussion) | 8 |
 | [`pets_audio_and_lighting`](pets_audio_and_lighting) | 15 |
+| [`pharmacy_dispensing`](pharmacy_dispensing) | 40 |
 | [`phone_and_tablet_accessories`](phone_and_tablet_accessories) | 9 |
 | [`physio_and_massage`](physio_and_massage) | 6 |
 | [`picture_framing`](picture_framing) | 7 |
