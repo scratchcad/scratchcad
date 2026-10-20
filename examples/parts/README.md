@@ -1,6 +1,6 @@
 # Parts
 
-779 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+829 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -25,6 +25,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`assorted`](assorted) | 30 |
 | [`automotive_and_bicycle`](automotive_and_bicycle) | 37 |
 | [`bearings_and_linear_motion`](bearings_and_linear_motion) | 29 |
+| [`construction`](construction) | 11 |
 | [`electronics`](electronics) | 34 |
 | [`fasteners`](fasteners) | 70 |
 | [`furniture_and_home_hardware`](furniture_and_home_hardware) | 42 |
@@ -37,16 +38,19 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`machine_elements`](machine_elements) | 40 |
 | [`marine_and_music`](marine_and_music) | 34 |
 | [`medical_and_bathroom`](medical_and_bathroom) | 40 |
+| [`office_and_sports`](office_and_sports) | 24 |
 | [`optics_and_photography`](optics_and_photography) | 40 |
+| [`pets_audio_and_lighting`](pets_audio_and_lighting) | 15 |
 | [`plumbing`](plumbing) | 26 |
 | [`tools`](tools) | 40 |
 | [`toys_and_games`](toys_and_games) | 39 |
 
 ## Status on main
 
-With the fixes in #61 to #75, every part validated, rendered and saved without warnings, except
-`assorted/flex_coupler`, which is measured approximately and says so. On main at 508fa1a, 748 of
-the 779 build cleanly. The other 31 hit the bugs those PRs fix:
+The first 779 parts were made with the fixes in #61 to #75, and with them every one validated,
+rendered and saved without warnings, except `assorted/flex_coupler`, which is measured
+approximately and says so. On main at 508fa1a, 748 of those 779 build cleanly. The other 31 hit
+the bugs those PRs fix:
 
 | part | on main |
 |---|---|
@@ -81,3 +85,6 @@ the 779 build cleanly. The other 31 hit the bugs those PRs fix:
 | [`medical_and_bathroom/button_hook_dressing_aid`](medical_and_bathroom/button_hook_dressing_aid.rhai) | could not be measured (#44) |
 | [`marine_and_music/boat_propeller_3_blade`](marine_and_music/boat_propeller_3_blade.rhai) | loft failed (#50) |
 | [`marine_and_music/d_shackle_8mm`](marine_and_music/d_shackle_8mm.rhai) | reported invalid after measuring (#42, #43) |
+
+Parts added after that were made on main itself, working around its bugs the way an agent would
+have to, and build there without warnings. The bugs they ran into are filed from #76 on.
