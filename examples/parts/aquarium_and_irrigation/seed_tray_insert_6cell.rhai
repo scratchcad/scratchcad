@@ -15,4 +15,4 @@ for i in 0..3 { for j in 0..2 {
     holes.push(cylinder([x, y, -1], "Z", 3.0, wall + 2.0));
 } }
 let lip = box_centered(3.0 * cell + 6.0, 2.0 * cell + 6.0, 2.0).translate([0, 0, depth - 1.0]);
-fuse_all(cells) + lip - compound(holes)
+fuse_all(cells) + lip - fuse_all(holes)

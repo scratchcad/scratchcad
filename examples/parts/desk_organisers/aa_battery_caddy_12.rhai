@@ -23,6 +23,6 @@ for j in 0..rows {
         cuts.push(cylinder([x, y, -1.0], "Z", 3.0, floor_t + 2.0));
     }
 }
-block = block - compound(cuts);
+block = block - fuse_all(cuts);
 let lw = min(50.0, w - 10.0);
 block - box_from_corners([w / 2.0 - lw / 2.0, -1.0, h / 2.0 - 6.0], [w / 2.0 + lw / 2.0, 0.8, h / 2.0 + 6.0])
