@@ -902,35 +902,48 @@ impl Shape {
             return Ok(thick);
         }
         // Without open faces OCCT returns the offset solid itself; subtract to get the walls.
-        if thickness < 0.0 {
-            self.cut(&thick)
-        } else {
-            thick.cut(self)
-        }
+        let walls = if thickness < 0.0 { self.cut(&thick) } else { thick.cut(self) };
+        walls.map_err(|_| shell_failed(self, thickness))
     }
 
+    /// OpenCASCADE's thick solid (with `open_faces`) or offset solid (without). It can report
+    /// success and still return an invalid solid, or the input unchanged, notably where the wall
+    /// is at least as thick as a fillet it offsets inward: several settings are tried, starting
+    /// with CadQuery's, and only a valid result whose volume changed is taken.
     fn thick_solid(&self, thickness: f64, open_faces: &[Shape]) -> Result<Self> {
+        let arc = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
+        let sharp = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Intersection;
         let mut faces = ffi::top_tools::new_list_of_shape();
         for face in open_faces {
             faces.pin_mut().Append(face.raw());
         }
-        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakeThickSolid_new();
-        make.pin_mut().MakeThickSolidByJoin(
-            self.raw(),
-            &faces,
-            thickness,
-            1e-3,
-            ffi::b_rep_offset_api::BRepOffset_Mode::BRepOffset_Skin,
-            false,
-            false,
-            ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc,
-            false,
-            &progress(),
-        )?;
-        if !make.IsDone() {
-            return Err(failed("shell"));
+        let before = self.volume_props()?.Mass().abs();
+        for (join, intersection) in [(arc, true), (sharp, true), (arc, false)] {
+            let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakeThickSolid_new();
+            let built = make.pin_mut().MakeThickSolidByJoin(
+                self.raw(),
+                &faces,
+                thickness,
+                1e-3,
+                ffi::b_rep_offset_api::BRepOffset_Mode::BRepOffset_Skin,
+                intersection,
+                false,
+                join,
+                false,
+                &progress(),
+            );
+            // A cancelled attempt fails like any other: stop rather than try the next one.
+            crate::cancel::check()?;
+            if built.is_err() || !make.IsDone() {
+                continue;
+            }
+            let thick = Self::from_algorithm(make.pin_mut().Shape()?)?;
+            let after = thick.volume_props()?.Mass().abs();
+            if thick.is_valid() && (after - before).abs() > 1e-6 * before.max(1.0) {
+                return Ok(thick);
+            }
         }
-        Self::from_algorithm(make.pin_mut().Shape()?)
+        Err(shell_failed(self, thickness))
     }
 
     /// Offsets a planar wire or face within its plane (positive grows it). A face keeps its
@@ -1435,6 +1448,22 @@ pub struct MassProperties {
     pub area: f64,
     /// The center of mass, as [`Shape::center`] finds it.
     pub center: DVec3,
+}
+
+fn shell_failed(shape: &Shape, thickness: f64) -> Error {
+    let free_form = shape
+        .faces()
+        .iter()
+        .any(|f| matches!(f.geom_type(), Ok("bspline" | "bezier" | "offset" | "other")));
+    let hint = if free_form {
+        "Lofted, swept and spline faces often can't be offset: build the inside as its own \
+         smaller shape that runs past the open ends, and subtract it"
+    } else {
+        "The usual cause is a fillet or other curved face tighter than the wall: shelling inward \
+         needs every fillet radius it offsets to exceed the thickness. Use a thinner wall or \
+         larger fillets, or shell first and fillet the outside edges afterwards"
+    };
+    invalid(format!("shell failed: OpenCASCADE could not offset the faces by {thickness}. {hint}"))
 }
 
 /// An axis-aligned bounding box.
