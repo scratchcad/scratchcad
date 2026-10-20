@@ -1,6 +1,6 @@
 # Parts
 
-2541 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2555 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -118,6 +118,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`percussion`](percussion) | 8 |
 | [`pets_audio_and_lighting`](pets_audio_and_lighting) | 15 |
 | [`phone_and_tablet_accessories`](phone_and_tablet_accessories) | 9 |
+| [`picture_framing`](picture_framing) | 7 |
 | [`plumbing`](plumbing) | 26 |
 | [`plumbing_and_heating_metric`](plumbing_and_heating_metric) | 41 |
 | [`pneumatics_and_hydraulics`](pneumatics_and_hydraulics) | 18 |
@@ -141,6 +142,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`surveying_and_layout`](surveying_and_layout) | 6 |
 | [`tabletop_gaming`](tabletop_gaming) | 8 |
 | [`theatre_film_and_av`](theatre_film_and_av) | 40 |
+| [`tool_organisers`](tool_organisers) | 7 |
 | [`tools`](tools) | 40 |
 | [`toys_and_games`](toys_and_games) | 39 |
 | [`tractor_and_mower_spares`](tractor_and_mower_spares) | 6 |
