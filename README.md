@@ -43,6 +43,9 @@ editor.
 | Create a 3DBenchy. | <img src="docs/images/benchy.gif" alt="Rotating 3DBenchy tugboat" width="320"><br>[`benchy.rhai`](docs/examples/benchy.rhai) |
 | Create a mid-stage compressor blisk with these dimensions: an outer tip diameter of 440 mm, a hub platform diameter of 241.2 mm, and a radial blade span of 99.4 mm across its 29 twisted aerodynamic airfoils. Mechanically, the component is defined by an 80.0 mm shaft interface bore diameter, an axial hub length of 77.5 mm, and an airfoil rim width of 45.0 mm, with rear mounting flange diameters measuring 184 mm at the inner shoulder and 202 mm at the outer rim. Blade count of 29 twisted aerodynamic airfoils. | <img src="docs/images/blisk.gif" alt="Rotating 29-blade compressor blisk" width="320"><br>[`blisk.rhai`](docs/examples/blisk.rhai) |
 
+[`examples/parts`](examples/parts) has 779 more parts, from bearings and fasteners to lab glassware
+and chess pieces, each written by hand by an agent through the MCP tools.
+
 ## Scripts and the editor
 
 The agent writes a part as a Rhai script and saves it to `./output`, where the
