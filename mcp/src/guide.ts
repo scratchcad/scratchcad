@@ -52,7 +52,7 @@ Operations (methods on shapes):
 
 Selectors pick faces or edges by a CadQuery-style string, wherever a method takes edges or faces: ">Z" farthest along +Z (the top), "<Z" nearest (the bottom), ">Z[1]" the next level down, "|Z" parallel to Z (vertical edges, or faces whose normal is along Z), "#Z" perpendicular, "+Z"/"-Z" facing that way, "%CIRCLE" or "%PLANE" by geometry type. Combine them with and, or, not, exc and parentheses: box(10, 10, 5).fillet(1, "|Z and >X"). Selections also have len(), indexing, first(), filter(|f| ...), sort_by(|f| ...), top(), bottom() and friends, and can be passed instead of a selector.
 
-Errors are catchable: try { ... } catch (err) { print(err) }. Fillets and chamfers fail when the radius is too large for the faces around an edge; do them last, on the finished body, with radii smaller than the walls they touch. Booleans need the tool to overlap the part: make cutting tools a little longer than the part is thick, rather than flush with its faces. Prefer one fuse_all(array) over many + in a loop.
+Errors are catchable: try { ... } catch (err) { print(err) }. Fillets and chamfers fail when the radius is too large for the faces around an edge; do them last, on the finished body, with radii smaller than the walls they touch. Booleans need the tool to overlap the part: make cutting tools a little longer than the part is thick, rather than flush with its faces. Prefer one fuse_all(array) over many + in a loop, and cut many holes at once with part - compound(holes), where the holes may overlap, like a bore and its counterbore.
 
 Example: a plate with four holes, rounded corners and a boss:
 ${indent(EXAMPLES.plate)}

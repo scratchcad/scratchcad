@@ -6,7 +6,21 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Section.hxx>
 #include <TopTools_ListOfShape.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <bindings_common.hxx>
+
+// Appends `tool` to `tools`, or a compound's children (and theirs) one by one. The shapes inside
+// one operand must not overlap: cutting with a compound of a hole and its counterbore as a single
+// tool leaves the counterbore uncut, without an error. Separate tools may overlap freely.
+inline void append_tools(const TopoDS_Shape &tool, TopTools_ListOfShape &tools) {
+  if (tool.ShapeType() != TopAbs_COMPOUND) {
+    tools.Append(tool);
+    return;
+  }
+  for (TopoDS_Iterator it(tool); it.More(); it.Next()) {
+    append_tools(it.Value(), tools);
+  }
+}
 
 // Runs a boolean operation in OpenCASCADE's "safe processing mode", which never modifies the
 // arguments (by default the operation may, for example, raise the tolerances of their
@@ -17,7 +31,10 @@ std::unique_ptr<TopoDS_Shape> run_boolean(const TopoDS_Shape &argument, const To
   TopTools_ListOfShape arguments;
   arguments.Append(argument);
   TopTools_ListOfShape tools;
-  tools.Append(tool);
+  append_tools(tool, tools);
+  if (tools.IsEmpty()) {
+    tools.Append(tool);
+  }
   Operation operation;
   operation.SetArguments(arguments);
   operation.SetTools(tools);

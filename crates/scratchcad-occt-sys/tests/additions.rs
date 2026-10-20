@@ -5,7 +5,7 @@ mod common;
 
 use common::{assert_close, make_box, make_box_at, pnt, progress, unique_count, volume};
 use scratchcad_occt_sys::{
-    b_rep_algo_api, b_rep_builder_api, b_rep_class3d,
+    b_rep, b_rep_algo_api, b_rep_builder_api, b_rep_class3d,
     b_rep_g_prop::BRepGProp,
     b_rep_mesh, b_rep_tools, g_prop,
     if_select::IFSelect_ReturnStatus,
@@ -13,6 +13,7 @@ use scratchcad_occt_sys::{
     message::{self, CancelFlag, Message_Gravity},
     step_control,
     top_abs::{TopAbs_ShapeEnum, TopAbs_State},
+    topo_ds,
 };
 use std::sync::{Arc, Mutex};
 
@@ -83,6 +84,23 @@ fn non_destructive_booleans() {
     // The arguments keep their original volumes.
     assert_close(volume(&a), 8.0, 1e-9);
     assert_close(volume(&b), 8.0, 1e-9);
+
+    // A compound tool works like its children given separately, even where they overlap each
+    // other: a hole through `a` and a counterbore around its top end.
+    let builder = b_rep::BRep_Builder_new();
+    let builder = b_rep::BRep_Builder_upcast_to_topods_builder(&builder);
+    let mut holes = topo_ds::TopoDS_Compound_new();
+    builder.MakeCompound(holes.pin_mut());
+    let mut holes = topo_ds::TopoDS_Compound_as_shape(holes);
+    builder.Add(holes.pin_mut(), &make_box_at(0.5, 0.5, -1.0, 1.0, 1.0, 4.0)).unwrap();
+    builder.Add(holes.pin_mut(), &make_box_at(0.25, 0.25, 1.5, 1.5, 1.5, 1.5)).unwrap();
+    let drilled = b_rep_algo_api::BRepAlgoAPI_cut(&a, &holes, &progress()).unwrap();
+    assert_close(volume(&drilled), 8.0 - 1.5 - 1.125, 1e-9);
+    let inside = b_rep_algo_api::BRepAlgoAPI_common(&a, &holes, &progress()).unwrap();
+    assert_close(volume(&inside), 2.625, 1e-9);
+    let merged = b_rep_algo_api::BRepAlgoAPI_fuse(&a, &holes, &progress()).unwrap();
+    assert_close(volume(&merged), 8.0 + 1.0 + 2.25, 1e-9);
+    assert_eq!(unique_count(&merged, TopAbs_ShapeEnum::TopAbs_SOLID), 1);
 }
 
 #[test]

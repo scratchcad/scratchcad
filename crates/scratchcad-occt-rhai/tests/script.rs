@@ -695,3 +695,22 @@ fn bundled_examples_run() {
     }
     assert!(count >= 4);
 }
+
+#[test]
+fn compound_tools_may_overlap() {
+    // A clearance hole and its counterbore cut as one compound, as the guide suggests for many
+    // holes: OpenCASCADE takes a compound operand to hold no overlapping shapes, so the
+    // counterbore used to be left uncut.
+    let setup = r#"
+        let blk = box_centered(30, 30, 20);
+        let holes = compound([cylinder([0, 0, -15], "Z", 3.3, 30.0), cylinder([0, 0, 4], "Z", 5.5, 10.0)]);
+    "#;
+    let f = |expr: &str| run::<f64>(&format!("{setup} {expr}"));
+    let separately = f("(blk - cylinder([0, 0, -15], \"Z\", 3.3, 30.0) - cylinder([0, 0, 4], \"Z\", 5.5, 10.0)).volume()");
+    assert_close(f("(blk - holes).volume()"), separately, 1e-6);
+    assert_close(f("(blk & holes).volume()"), 18000.0 - separately, 1e-6);
+    assert_eq!(
+        run::<INT>(&format!("{setup} (blk + holes.translate([20, 0, 0])).solids().len()")),
+        1
+    );
+}
