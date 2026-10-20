@@ -1,6 +1,6 @@
 # Parts
 
-2199 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2280 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -76,6 +76,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`home_brewing`](home_brewing) | 6 |
 | [`home_decor`](home_decor) | 14 |
 | [`household`](household) | 28 |
+| [`hvac_ductwork_metric`](hvac_ductwork_metric) | 41 |
 | [`hvac_electrical_and_solar`](hvac_electrical_and_solar) | 41 |
 | [`industrial_automation`](industrial_automation) | 10 |
 | [`industrial_safety_and_ppe`](industrial_safety_and_ppe) | 42 |
@@ -84,6 +85,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`joinery_and_woodwork`](joinery_and_woodwork) | 17 |
 | [`kitchen`](kitchen) | 40 |
 | [`kitchen_storage`](kitchen_storage) | 5 |
+| [`lab_automation_and_printer_upgrades`](lab_automation_and_printer_upgrades) | 40 |
 | [`lab_ware`](lab_ware) | 39 |
 | [`leatherworking`](leatherworking) | 6 |
 | [`lighting_fixtures`](lighting_fixtures) | 10 |
