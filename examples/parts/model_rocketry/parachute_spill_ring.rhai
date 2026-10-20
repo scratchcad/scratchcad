@@ -1,6 +1,6 @@
 // Parachute shroud line ring / spill-hole reinforcement: 30 mm OD 18 mm ID 1.5 mm with 8 line holes 1.5 mm
-let od = 30.0; // [20.0, 50.0] Outside diameter (mm)
-let id = 18.0; // [10.0, 35.0] Inside diameter (mm)
+let od = 30.0; // [30.0, 50.0] Outside diameter (mm)
+let id = 18.0; // [10.0, 24.0] Inside diameter (mm)
 let t = 1.5; // [1.0, 3.0] Thickness (mm)
 let lines = 8; // [6, 16] Number of shroud lines
 let ring = cylinder(od / 2.0, t) - cylinder([0, 0, -1], "Z", id / 2.0, t + 2.0);

@@ -1,6 +1,6 @@
 // Baby toy C-link: 45 x 30 mm oval C, 6 mm round section, 5 mm opening
 let length = 45.0; // [30.0, 60.0] Link length (mm)
-let width = 30.0; // [20.0, 40.0] Link width (mm)
+let width = 30.0; // [20.0, 34.0] Link width (mm)
 let section = 6.0; // [4.0, 8.0] Section (mm)
 let gap = 5.0; // [3.0, 8.0] Opening (mm)
 let outer = box_centered(length, width, section).translate([0, 0, section / 2.0]);

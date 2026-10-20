@@ -1,5 +1,5 @@
 // 25 mm D-ring: 4 mm wire, 27 mm inside straight, 22 mm inside depth
-let inside_w = 27.0; // [15.0, 52.0] Inside straight length (mm)
+let inside_w = 27.0; // [15.0, 30.0] Inside straight length (mm)
 let depth = 22.0; // [16.0, 40.0] Inside depth (mm)
 let wire_d = 4.0; // [2.5, 6.0] Wire diameter (mm)
 let r = wire_d / 2.0;

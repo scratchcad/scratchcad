@@ -2,7 +2,7 @@
 let length = 100.0; // [70.0, 140.0] Plate length (mm)
 let width = 60.0; // [40.0, 80.0] Plate width (mm)
 let t = 5.0; // [4.0, 8.0] Plate thickness (mm)
-let bar = 12.0; // [8.0, 16.0] Hook bar diameter (mm)
+let bar = 12.0; // [8.0, 12.0] Hook bar diameter (mm)
 let plate = box_centered(length, width, t).translate([0, 0, -t / 2.0]);
 let p = plate.fillet(8.0, plate.edges("|Z"));
 let r = bar / 2.0;
