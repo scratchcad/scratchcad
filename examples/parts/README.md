@@ -1,6 +1,6 @@
 # Parts
 
-1659 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+1755 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -28,6 +28,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`assorted`](assorted) | 30 |
 | [`automotive_and_bicycle`](automotive_and_bicycle) | 37 |
 | [`baby_and_nursery`](baby_and_nursery) | 12 |
+| [`baking`](baking) | 8 |
 | [`bar_and_restaurant`](bar_and_restaurant) | 11 |
 | [`bathroom_and_cleaning`](bathroom_and_cleaning) | 42 |
 | [`bbq_and_grill`](bbq_and_grill) | 10 |
@@ -61,10 +62,12 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`household`](household) | 28 |
 | [`hvac_electrical_and_solar`](hvac_electrical_and_solar) | 41 |
 | [`industrial_automation`](industrial_automation) | 10 |
+| [`industrial_safety_and_ppe`](industrial_safety_and_ppe) | 42 |
 | [`jewellery_watches_and_fashion`](jewellery_watches_and_fashion) | 40 |
 | [`joinery_and_woodwork`](joinery_and_woodwork) | 17 |
 | [`kitchen`](kitchen) | 40 |
 | [`lab_ware`](lab_ware) | 39 |
+| [`leatherworking`](leatherworking) | 6 |
 | [`lighting_fixtures`](lighting_fixtures) | 10 |
 | [`machine_elements`](machine_elements) | 40 |
 | [`marine_and_music`](marine_and_music) | 34 |
@@ -88,6 +91,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`sewing_and_crafts`](sewing_and_crafts) | 20 |
 | [`smart_home`](smart_home) | 7 |
 | [`sports_and_fitness`](sports_and_fitness) | 40 |
+| [`theatre_film_and_av`](theatre_film_and_av) | 40 |
 | [`tools`](tools) | 40 |
 | [`toys_and_games`](toys_and_games) | 39 |
 | [`watersports`](watersports) | 9 |
