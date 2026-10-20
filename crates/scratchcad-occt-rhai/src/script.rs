@@ -167,6 +167,15 @@ pub fn register(engine: &mut Engine) {
     register_results(engine);
 }
 
+/// The index of a vector component: 0, 1 or 2 (or -3, -2 or -1, from the end).
+fn component(i: INT) -> RhaiResult<usize> {
+    match i {
+        0..=2 => Ok(i as usize),
+        -3..=-1 => Ok((i + 3) as usize),
+        _ => Err(invalid(format!("a vec3 has components 0 to 2 (or -3 to -1), not {i}"))),
+    }
+}
+
 fn register_vec3(engine: &mut Engine) {
     engine
         .register_type_with_name::<DVec3>("Vec3")
@@ -190,6 +199,14 @@ fn register_vec3(engine: &mut Engine) {
         })
         .register_set("z", |v: &mut DVec3, z: Dynamic| -> RhaiResult<()> {
             v.z = number(&z, "z")?;
+            Ok(())
+        })
+        // Like the [x, y, z] arrays scripts also use for vectors.
+        .register_indexer_get(|v: &mut DVec3, i: INT| -> RhaiResult<FLOAT> {
+            Ok(v[component(i)?])
+        })
+        .register_indexer_set(|v: &mut DVec3, i: INT, value: Dynamic| -> RhaiResult<()> {
+            v[component(i)?] = number(&value, "vector component")?;
             Ok(())
         })
         .register_fn("+", |a: DVec3, b: DVec3| a + b)
