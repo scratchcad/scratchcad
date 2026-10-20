@@ -1,5 +1,5 @@
 // 7-day pill organiser tray: seven 25 x 30 mm compartments 20 mm deep with scooped floors, 1.5 mm walls, tactile day dots (1 to 7) on the front
-let days = 7; // [1, 14] Number of compartments
+let days = 7; // [1, 11] Number of compartments
 let cell_width = 25.0; // [15.0, 40.0] Compartment width (mm)
 let cell_length = 30.0; // [20.0, 50.0] Compartment length front to back (mm)
 let depth = 20.0; // [10.0, 35.0] Compartment depth (mm)

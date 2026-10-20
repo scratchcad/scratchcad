@@ -3,7 +3,7 @@ let length = 50.0; // [40.0, 120.0] Plate length (mm)
 let width = 38.0; // [36.0, 40.0] Dovetail width at the base (mm)
 let thickness = 10.0; // [8.0, 14.0] Plate thickness (mm)
 let dovetail_height = 4.0; // [3.0, 6.0] Dovetail height (mm)
-let slot_length = 22.0; // [0.0, 80.0] Screw slot length (mm)
+let slot_length = 22.0; // [8.8, 80.0] Screw slot length (mm)
 let w = width / 2.0;
 let profile = polygon("YZ", [[-w, 0.4], [-w + 0.4, 0], [w - 0.4, 0], [w, 0.4], [w - dovetail_height + 0.4, dovetail_height], [w - dovetail_height + 0.4, thickness],
                              [-w + dovetail_height - 0.4, thickness], [-w + dovetail_height - 0.4, dovetail_height]]);

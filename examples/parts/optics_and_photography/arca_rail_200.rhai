@@ -1,9 +1,9 @@
 // Arca-Swiss compatible nodal / macro rail: 200 x 38 mm, 12 mm tall, 45 deg dovetails, 6.5 mm through slot 160 mm long, 1/4-20 and 3/8-16 tapped holes at each end, safety-stop screw holes
 let length = 200.0; // [80.0, 400.0] Rail length (mm)
 let width = 38.0; // [36.0, 40.0] Dovetail width (mm)
-let height = 12.0; // [9.0, 16.0] Rail height (mm)
-let dovetail_height = 4.5; // [3.0, 6.0] Dovetail height (mm)
-let end_margin = 20.0; // [12.0, 40.0] Solid length at each end (mm)
+let height = 12.0; // [10.2, 16.0] Rail height (mm)
+let dovetail_height = 4.5; // [3.0, 5.4] Dovetail height (mm)
+let end_margin = 20.0; // [18.3, 40.0] Solid length at each end (mm)
 let w = width / 2.0;
 let d = dovetail_height;
 // dovetails on both the bottom (for a clamp) and the top (for a plate clamp to ride on)

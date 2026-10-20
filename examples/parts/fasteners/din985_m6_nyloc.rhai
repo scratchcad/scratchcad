@@ -1,8 +1,8 @@
 // DIN 985 M6 nylon insert lock nut: 10 mm AF, 6 mm total height, round collar holding the insert
 let across_flats = 10.0; // [5.5, 24.0] Width across flats (mm)
-let height = 6.0; // [3.0, 15.0] Overall height (mm)
-let hex_h = 4.0; // [2.0, 10.0] Hex height (mm)
-let bore = 5.0; // [2.5, 14.0] Bore (mm)
+let height = 6.0; // [4.9, 15.0] Overall height (mm)
+let hex_h = 4.0; // [2.0, 5.3] Hex height (mm)
+let bore = 5.0; // [2.5, 8.2] Bore (mm)
 let rc = across_flats / sqrt(3.0);
 let pts = [];
 for i in 0..6 { let a = (i * 60 + 30).to_float() * PI() / 180.0; pts.push([rc * a.cos(), rc * a.sin()]); }

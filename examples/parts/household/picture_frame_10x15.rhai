@@ -2,7 +2,7 @@
 let photo_w = 100.0; // [50.0, 300.0] Photo width (mm)
 let photo_h = 150.0; // [50.0, 400.0] Photo height (mm)
 let moulding = 20.0; // [10.0, 50.0] Moulding width (mm)
-let depth = 12.0; // [6.0, 30.0] Depth (mm)
+let depth = 12.0; // [8.4, 30.0] Depth (mm)
 let rebate = 6.0; // [3.0, 10.0] Rebate width (mm)
 let ow = photo_w + 2.0 * (moulding - rebate); let oh = photo_h + 2.0 * (moulding - rebate);
 let frame = box_centered(ow, oh, depth).translate([0, 0, depth / 2.0]);

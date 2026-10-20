@@ -1,5 +1,5 @@
 // LM10UU linear bearing: 10 mm bore, 19 mm OD, 29 mm long, two ring grooves 22 mm apart
-let bore = 10.0; // [6.0, 20.0] Bore (mm)
+let bore = 10.0; // [6.0, 16.0] Bore (mm)
 let outer = 19.0; // [12.0, 32.0] Outside diameter (mm)
 let length = 29.0; // [19.0, 45.0] Length (mm)
 let groove_spacing = 22.0; // [12.0, 35.0] Groove spacing (mm)

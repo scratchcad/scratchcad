@@ -1,5 +1,5 @@
 // DIN 472 internal retaining ring for a 22 mm bore: 23.2 mm free OD, 1 mm thick, lugs inward
-let bore = 22.0; // [10.0, 80.0] Bore diameter (mm)
+let bore = 22.0; // [14.8, 80.0] Bore diameter (mm)
 let thickness = 1.0; // [0.6, 3.0] Thickness (mm)
 let width = 2.2; // [1.2, 6.0] Ring width (mm)
 let outer_r = bore * 1.055 / 2.0;

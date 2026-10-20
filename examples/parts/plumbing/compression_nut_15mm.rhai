@@ -1,7 +1,7 @@
 // 15 mm copper compression nut with olive: 22 mm hex 13 mm long, internal 1/2 in thread zone, brass olive 15 x 8 mm
 let hex = 22.0; // [17.0, 32.0] Hex size (mm)
 let length = 13.0; // [9.0, 18.0] Nut length (mm)
-let pipe = 15.0; // [8.0, 28.0] Pipe size (mm)
+let pipe = 15.0; // [8.0, 19.7] Pipe size (mm)
 let rc = hex / sqrt(3.0);
 let pts = [];
 for i in 0..6 { let a = (i * 60 + 30).to_float() * PI() / 180.0; pts.push([rc * a.cos(), rc * a.sin()]); }

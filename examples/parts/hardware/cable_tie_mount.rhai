@@ -1,5 +1,5 @@
 // Adhesive cable tie mount: 20 x 20 mm base 1.5 mm thick with a cross-shaped tie tunnel 5 mm wide
-let size = 20.0; // [10.0, 40.0] Base size (mm)
+let size = 20.0; // [14.0, 40.0] Base size (mm)
 let base_t = 1.5; // [1.0, 3.0] Base thickness (mm)
 let tunnel_w = 5.0; // [2.5, 9.0] Tie width (mm)
 let tunnel_h = 1.8; // [1.0, 3.0] Tie thickness (mm)

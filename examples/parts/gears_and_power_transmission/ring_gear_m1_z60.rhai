@@ -1,8 +1,8 @@
 // Internal ring gear module 1, 60 teeth, 8 mm face, 70 mm OD, with 6 mounting holes on a 66 mm circle
-let gear_module = 1.0; // [0.5, 2.0] Module (mm)
-let teeth = 60; // [40, 120] Number of teeth
+let gear_module = 1.0; // [0.5, 1.0] Module (mm)
+let teeth = 60; // [40, 68] Number of teeth
 let face = 8.0; // [4.0, 20.0] Face width (mm)
-let outer_d = 72.0; // [60.0, 140.0] Outside diameter (mm)
+let outer_d = 72.0; // [64.8, 140.0] Outside diameter (mm)
 // One involute tooth outline (closed polygon in XY), centred on +X, for a gear of `teeth` teeth.
 fn tooth(m, teeth, pa, backlash) {
     let rp = m * teeth.to_float() / 2.0;

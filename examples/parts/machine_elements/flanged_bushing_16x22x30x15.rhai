@@ -2,7 +2,7 @@
 let bore = 16.0; // [6.0, 50.0] Bore diameter (mm)
 let outer_diameter = 22.0; // [9.0, 60.0] Outer diameter (mm)
 let flange_diameter = 30.0; // [12.0, 80.0] Flange diameter (mm)
-let flange_thickness = 3.0; // [1.0, 8.0] Flange thickness (mm)
+let flange_thickness = 3.0; // [1.8, 8.0] Flange thickness (mm)
 let length = 15.0; // [5.0, 60.0] Overall length (mm)
 let ri = bore / 2.0;
 let ro = max(outer_diameter / 2.0, ri + 1.5);

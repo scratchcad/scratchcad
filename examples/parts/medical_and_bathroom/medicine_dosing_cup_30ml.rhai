@@ -1,8 +1,8 @@
 // 30 ml medicine dosing cup: 40 mm at the rim, 32 mm at the base, 1.2 mm wall, raised graduation rings at every 5 ml computed from the cup's taper
-let rim_diameter = 40.0; // [30.0, 55.0] Rim outside diameter (mm)
-let base_diameter = 32.0; // [22.0, 45.0] Base outside diameter (mm)
+let rim_diameter = 40.0; // [34.0, 55.0] Rim outside diameter (mm)
+let base_diameter = 32.0; // [22.0, 39.8] Base outside diameter (mm)
 let height = 36.0; // [25.0, 50.0] Height (mm)
-let wall = 1.2; // [0.8, 2.0] Wall thickness (mm)
+let wall = 1.2; // [1.0, 2.0] Wall thickness (mm)
 let step_ml = 5.0; // [1.0, 10.0] Graduation step (ml)
 let r1 = rim_diameter / 2.0;
 let r0 = min(base_diameter / 2.0, r1);

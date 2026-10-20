@@ -1,6 +1,6 @@
 // DIN 914 M5 x 8 cone point set screw, 2.5 mm hex socket
-let diameter = 5.0; // [3.0, 12.0] Thread diameter (mm)
-let length = 8.0; // [4.0, 30.0] Length (mm)
+let diameter = 5.0; // [3.0, 9.2] Thread diameter (mm)
+let length = 8.0; // [5.6, 30.0] Length (mm)
 let socket = 2.5; // [1.5, 6.0] Hex key size (mm)
 let point = diameter / 2.0;
 let body = sketch("XZ").move_to(0, 0).hline_to(0.2).line_to(diameter / 2.0, point).vline_to(length - 0.4)

@@ -1,7 +1,7 @@
 // Thorlabs TR3 optical post: 12.7 mm (1/2 in) diameter, 76.2 mm (3 in) long, 8-32 tapped top hole and 1/4-20 tapped bottom hole, both 6.4 mm deep
 let length = 76.2; // [20.0, 150.0] Post length (mm)
 let diameter = 12.7; // [10.0, 25.4] Post diameter (mm)
-let hole_depth = 6.4; // [4.0, 10.0] Tapped hole depth (mm)
+let hole_depth = 6.4; // [4.0, 7.2] Tapped hole depth (mm)
 let tan30 = (30.0 * PI() / 180.0).tan();
 fn internal_thread(r_major, pitch, depth, tan30) {
     let r_minor = r_major - 0.541 * pitch;

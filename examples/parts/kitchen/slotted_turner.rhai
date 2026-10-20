@@ -1,7 +1,7 @@
 // Slotted kitchen turner (fish slice): 90 x 110 mm blade 2 mm thick with five 6 mm slots and a 1 mm bevelled front, 40 mm neck rising 15 deg, 150 mm handle 24 x 12 mm with a 6 mm hanging hole
 let blade_width = 90.0; // [60.0, 120.0] Blade width (mm)
 let blade_length = 110.0; // [80.0, 150.0] Blade length (mm)
-let blade_thickness = 2.0; // [1.0, 3.0] Blade thickness (mm)
+let blade_thickness = 2.0; // [1.4, 3.0] Blade thickness (mm)
 let slot_count = 5; // [0, 8] Number of slots
 let neck_angle = 15.0; // [0.0, 30.0] Neck rise (deg)
 let handle_length = 150.0; // [100.0, 220.0] Handle length (mm)

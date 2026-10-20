@@ -1,6 +1,6 @@
 // 6 mm nylon wall plug: 30 mm body with eight barb rings, 8 mm collar, two anti-rotation fins, split tip, 3.5 mm screw bore
 let len = 30.0; // [20.0, 60.0] Length (mm)
-let d = 6.0; // [4.0, 12.0] Drill size (mm)
+let d = 6.0; // [4.8, 12.0] Drill size (mm)
 let r = d / 2.0;
 let plug = cylinder(r - 0.3, len) + cylinder([0, 0, -1.0], "Z", r + 1.0, 1.0);
 let n = ((len - 4.0) / 3.0).to_int();

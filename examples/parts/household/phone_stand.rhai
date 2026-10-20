@@ -2,7 +2,7 @@
 let width = 70.0; // [50.0, 120.0] Width (mm)
 let angle = 65.0; // [45.0, 80.0] Back rest angle (degrees)
 let back = 100.0; // [60.0, 160.0] Back rest length (mm)
-let thickness = 4.0; // [3.0, 8.0] Thickness (mm)
+let thickness = 4.0; // [3.0, 6.4] Thickness (mm)
 let a = angle * PI() / 180.0;
 let base = box(80.0, width, thickness);
 let rest = box(back, width, thickness).rotate_y(-angle).translate([20.0, 0, thickness]);

@@ -2,7 +2,7 @@
 let wire_diameter = 1.5; // [0.5, 4.0] Wire diameter (mm)
 let outer_diameter = 15.0; // [5.0, 50.0] Outer diameter (mm)
 let free_length = 40.0; // [10.0, 120.0] Free length (mm)
-let active_coils = 6; // [2, 20] Active coils
+let active_coils = 6; // [2, 6] Active coils
 const per_turn = 12;
 let d = wire_diameter;
 let rm = outer_diameter / 2.0 - d / 2.0;

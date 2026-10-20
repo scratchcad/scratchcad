@@ -1,8 +1,8 @@
 // US single-gang electrical box: 2 x 3 in (51 x 76 mm) opening, 64 mm deep, 2 mm walls, mounting ears with 6-32 holes 83.3 mm apart
 let width = 51.0; // [51.0, 105.0] Opening width (mm)
-let height = 76.0; // [76.0, 115.0] Opening height (mm)
+let height = 76.0; // [76.0, 90.0] Opening height (mm)
 let depth = 64.0; // [40.0, 90.0] Depth (mm)
-let wall = 2.0; // [1.5, 3.5] Wall thickness (mm)
+let wall = 2.0; // [1.5, 2.9] Wall thickness (mm)
 let ear_centres = 83.3; // [83.3, 83.3] Device screw centres (mm)
 let shell = box_centered(width + 2.0 * wall, height + 2.0 * wall, depth).translate([0, 0, -depth / 2.0]).fillet(3.0, "|Z").shell(-wall, ">Z");
 let ears = [];

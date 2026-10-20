@@ -2,7 +2,7 @@
 let thread_d = 20.95; // [13.0, 48.0] Thread diameter (mm)
 let thread_l = 12.0; // [8.0, 25.0] Thread length (mm)
 let hex = 24.0; // [16.0, 55.0] Hex size (mm)
-let bore = 15.0; // [8.0, 40.0] Bore (mm)
+let bore = 15.0; // [8.0, 20.4] Bore (mm)
 let rc = hex / sqrt(3.0);
 let pts = [];
 for i in 0..6 { let a = (i * 60 + 30).to_float() * PI() / 180.0; pts.push([rc * a.cos(), rc * a.sin()]); }

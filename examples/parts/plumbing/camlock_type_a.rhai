@@ -2,7 +2,7 @@
 let outer_d = 49.0; // [30.0, 110.0] Coupling OD (mm)
 let groove_d = 44.0; // [26.0, 100.0] Groove diameter (mm)
 let length = 70.0; // [40.0, 120.0] Length (mm)
-let bore = 25.0; // [12.0, 80.0] Bore (mm)
+let bore = 25.0; // [12.0, 36.9] Bore (mm)
 let body = cylinder(outer_d / 2.0, length * 0.45) + cylinder([0, 0, length * 0.45 - 0.01], "Z", outer_d / 2.0 - 4.0, length * 0.55);
 body = body - (cylinder([0, 0, length * 0.15], "Z", outer_d / 2.0 + 1.0, 6.0) - cylinder([0, 0, 0], "Z", groove_d / 2.0, length));
 let rc = (outer_d - 2.0) / sqrt(3.0);

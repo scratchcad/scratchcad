@@ -1,6 +1,6 @@
 // Cam cleat for 3 to 12 mm line: 76 x 30 mm base with two 5.5 mm holes 38 mm apart, two sprung toothed cams 25 mm across on 6 mm pins
 let base_len = 76.0; // [50.0, 110.0] Base length (mm)
-let cam_d = 25.0; // [18.0, 35.0] Cam diameter (mm)
+let cam_d = 25.0; // [20.8, 31.0] Cam diameter (mm)
 let base = box_centered(base_len, 30.0, 6.0).translate([0, 0, 3.0]).fillet(10.0, "|Z").chamfer(1.0, ">Z");
 for x in [-19.0, 19.0] { base -= cylinder([x, 0, -1], "Z", 2.75, 8.0); }
 let cams = [];

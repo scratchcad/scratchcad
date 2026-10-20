@@ -1,5 +1,5 @@
 // Spur gear blank for module 2, 30 teeth: 64 mm tip diameter, 20 mm face, 40 mm hub projecting 10 mm, web recess 5 mm deep each side, 20 mm bore with 6 mm keyway, 1 mm tip chamfers
-let gear_module = 2.0; // [0.5, 6.0] Module (mm)
+let gear_module = 2.0; // [1.1, 6.0] Module (mm)
 let teeth = 30; // [12, 120] Number of teeth
 let face_width = 20.0; // [5.0, 60.0] Face width (mm)
 let hub_diameter = 40.0; // [15.0, 100.0] Hub diameter (mm)

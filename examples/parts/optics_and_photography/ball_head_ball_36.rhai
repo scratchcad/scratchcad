@@ -1,6 +1,6 @@
 // Tripod ball head ball: 36 mm polished sphere with a 16 mm neck 10 mm long to a 40 mm top platform 6 mm thick, 3/8-16 stud hole in the platform, flat on the underside
 let ball_diameter = 36.0; // [20.0, 60.0] Ball diameter (mm)
-let neck_diameter = 16.0; // [8.0, 30.0] Neck diameter (mm)
+let neck_diameter = 16.0; // [11.2, 30.0] Neck diameter (mm)
 let neck_length = 10.0; // [4.0, 20.0] Neck length above the ball (mm)
 let platform_diameter = 40.0; // [25.0, 70.0] Platform diameter (mm)
 let platform_thickness = 6.0; // [3.0, 12.0] Platform thickness (mm)

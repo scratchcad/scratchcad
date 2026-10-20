@@ -1,5 +1,5 @@
 // Valved holding chamber (inhaler spacer): 50 mm chamber 150 mm long, 2 mm wall, 28 mm mouthpiece, 36 mm MDI boot port, valve seat with 4 spokes
-let chamber_diameter = 50.0; // [35.0, 70.0] Chamber diameter (mm)
+let chamber_diameter = 50.0; // [35.0, 62.0] Chamber diameter (mm)
 let chamber_length = 150.0; // [80.0, 220.0] Overall length (mm)
 let mouthpiece_diameter = 28.0; // [20.0, 34.0] Mouthpiece diameter (mm)
 let port_diameter = 36.0; // [28.0, 45.0] Inhaler boot port diameter (mm)

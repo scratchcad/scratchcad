@@ -1,9 +1,9 @@
 // Button hook dressing aid: 30 mm built-up handle 110 mm long with finger grooves, 1.6 mm steel wire loop 40 mm long and 9 mm wide
-let handle_length = 110.0; // [70.0, 150.0] Handle length (mm)
-let handle_diameter = 30.0; // [20.0, 40.0] Handle diameter (mm)
-let loop_length = 40.0; // [25.0, 60.0] Wire loop length (mm)
-let loop_width = 9.0; // [6.0, 14.0] Wire loop width (mm)
-let wire_diameter = 1.6; // [1.0, 2.5] Wire diameter (mm)
+let handle_length = 110.0; // [86.0, 150.0] Handle length (mm)
+let handle_diameter = 30.0; // [20.0, 33.6] Handle diameter (mm)
+let loop_length = 40.0; // [31.0, 60.0] Wire loop length (mm)
+let loop_width = 9.0; // [6.0, 12.0] Wire loop width (mm)
+let wire_diameter = 1.6; // [1.0, 2.1] Wire diameter (mm)
 let rh = handle_diameter / 2.0;
 let side = spline([[rh * 0.7, 0, 0], [rh * 0.97, 0, handle_length * 0.25], [rh * 0.9, 0, handle_length * 0.55], [rh * 0.8, 0, handle_length * 0.85], [rh * 0.5, 0, handle_length]]);
 let handle = wire([line([0, 0, 0], [rh * 0.7, 0, 0]), side, line([rh * 0.5, 0, handle_length], [0, 0, handle_length]), line([0, 0, handle_length], [0, 0, 0])])

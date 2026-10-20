@@ -1,5 +1,5 @@
 // External retaining ring DIN 471 for a 20 mm shaft: 1.2 mm thick, 18.5 mm free inner diameter, 2.6 mm radial width tapering toward the lugs, 2 mm lug holes, 4 mm lug height
-let shaft = 20.0; // [10.0, 60.0] Shaft diameter (mm)
+let shaft = 20.0; // [10.0, 34.4] Shaft diameter (mm)
 let thickness = 1.2; // [0.6, 3.0] Ring thickness (mm)
 let inner_diameter = 18.5; // [9.0, 57.0] Free inner diameter (mm)
 let ring_width = 2.6; // [1.0, 6.0] Radial width at the back (mm)

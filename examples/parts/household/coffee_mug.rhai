@@ -1,7 +1,7 @@
 // Coffee mug: 82 mm diameter, 95 mm tall, 4 mm walls, 6 mm base, C-shaped handle 12 mm thick
 let diameter = 82.0; // [60.0, 110.0] Outside diameter (mm)
 let height = 95.0; // [60.0, 140.0] Height (mm)
-let wall = 4.0; // [2.0, 8.0] Wall thickness (mm)
+let wall = 4.0; // [2.8, 8.0] Wall thickness (mm)
 let base = 6.0; // [3.0, 12.0] Base thickness (mm)
 let r = diameter / 2.0;
 let body = cylinder(r, height).fillet(3.0, "<Z");

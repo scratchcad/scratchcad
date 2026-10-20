@@ -1,6 +1,6 @@
 // SRD-05VDC relay: 19 x 15.5 x 15.4 mm housing with label recess and 5 pins (coil, COM, NO, NC)
 let length = 19.0; // [15.0, 25.0] Length (mm)
-let width = 15.5; // [10.0, 20.0] Width (mm)
+let width = 15.5; // [12.2, 20.0] Width (mm)
 let height = 15.4; // [10.0, 20.0] Height (mm)
 let body = box_centered(length, width, height).translate([0, 0, height / 2.0]).chamfer(0.4, "|Z or >Z");
 body = body - box_centered(length - 3.0, width - 3.0, 0.3).translate([0, 0, height - 0.15 + 0.01]);

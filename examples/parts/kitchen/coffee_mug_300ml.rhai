@@ -1,7 +1,7 @@
 // Coffee mug, 300 ml: 82 mm OD, 95 mm tall, 4 mm wall, 6 mm base with a foot ring, D-shaped handle swept from a 14 x 9 mm rounded section
 let outer_diameter = 82.0; // [60.0, 110.0] Outside diameter (mm)
 let height = 95.0; // [60.0, 140.0] Height (mm)
-let wall = 4.0; // [2.5, 6.0] Wall thickness (mm)
+let wall = 4.0; // [3.7, 6.0] Wall thickness (mm)
 let base = 6.0; // [4.0, 10.0] Base thickness (mm)
 let handle_reach = 32.0; // [20.0, 50.0] Handle reach from the wall (mm)
 let ro = outer_diameter / 2.0;

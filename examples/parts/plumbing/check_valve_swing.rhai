@@ -1,6 +1,6 @@
 // 1 in brass swing check valve body: 80 mm long, 45 mm body with a 50 mm bonnet cap, 25 mm bore, hex ends 38 mm
 let length = 80.0; // [50.0, 160.0] Length (mm)
-let body_d = 45.0; // [30.0, 100.0] Body diameter (mm)
+let body_d = 45.0; // [36.0, 100.0] Body diameter (mm)
 let bore = 25.0; // [12.0, 60.0] Bore (mm)
 let hex = 38.0; // [24.0, 80.0] End hex size (mm)
 let rc = hex / sqrt(3.0);

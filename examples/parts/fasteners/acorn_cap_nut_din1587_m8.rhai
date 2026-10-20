@@ -1,6 +1,6 @@
 // Domed acorn cap nut DIN 1587 M8: 13 mm across flats, 15 mm overall height, 6.5 mm hex with chamfer, 13 mm domed cap, blind 6.65 mm bore 11 mm deep
-let thread_diameter = 8.0; // [4.0, 24.0] Thread size (mm)
-let across_flats = 13.0; // [7.0, 36.0] Across flats (mm)
+let thread_diameter = 8.0; // [4.0, 17.6] Thread size (mm)
+let across_flats = 13.0; // [7.0, 26.8] Across flats (mm)
 let height = 15.0; // [8.0, 45.0] Overall height (mm)
 let hex_height = 6.5; // [3.0, 20.0] Hex height (mm)
 let s = max(across_flats, thread_diameter * 1.4);

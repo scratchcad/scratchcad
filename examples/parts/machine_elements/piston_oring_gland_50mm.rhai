@@ -1,6 +1,6 @@
 // Pneumatic piston for a 50 mm bore with a static/dynamic O-ring gland: AS568-227 ring (3.53 mm section, 44.04 mm ID), 2.9 mm gland depth, 4.8 mm groove width, 30 mm long, 12 mm rod hole
 let bore = 50.0; // [20.0, 120.0] Cylinder bore (mm)
-let length = 30.0; // [15.0, 60.0] Piston length (mm)
+let length = 30.0; // [21.0, 60.0] Piston length (mm)
 let cross_section = 3.53; // [1.78, 6.99] O-ring cross-section (mm)
 let gland_depth = 2.9; // [1.3, 6.0] Gland depth (mm)
 let groove_width = 4.8; // [2.4, 9.5] Groove width (mm)

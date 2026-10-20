@@ -1,8 +1,8 @@
 // ISO 10642 M5 x 16 countersunk socket screw: 10 mm head, 90 degree countersink, 3 mm hex
-let diameter = 5.0; // [3.0, 12.0] Thread diameter (mm)
+let diameter = 5.0; // [3.0, 9.2] Thread diameter (mm)
 let length = 16.0; // [8.0, 50.0] Overall length (mm)
 let head_d = 10.0; // [6.0, 24.0] Head diameter (mm)
-let socket = 3.0; // [2.0, 8.0] Hex key size (mm)
+let socket = 3.0; // [2.0, 4.8] Hex key size (mm)
 let head_h = (head_d - diameter) / 2.0;
 let body = sketch("XZ").move_to(0, 0).hline_to(diameter / 2.0).vline_to(length - head_h)
     .line_to(head_d / 2.0, length).hline_to(0).close().to_face().revolve("Z", 360);

@@ -2,8 +2,8 @@
 let length = 110.0; // [70.0, 160.0] Length (mm)
 let width = 75.0; // [50.0, 120.0] Width (mm)
 let height = 20.0; // [10.0, 40.0] Height (mm)
-let wall = 2.0; // [1.2, 4.0] Wall thickness (mm)
-let slots = 7; // [0, 12] Drain slots
+let wall = 2.0; // [1.2, 3.2] Wall thickness (mm)
+let slots = 7; // [0, 10] Drain slots
 let dish = box_centered(length, width, height).translate([0, 0, height / 2.0]).fillet(15.0, "|Z").fillet(4.0, "<Z");
 dish = dish.shell(-wall, ">Z");
 let cuts = [];

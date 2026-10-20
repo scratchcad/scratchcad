@@ -1,5 +1,5 @@
 // Spur pinion module 1, 12 teeth (undercut range), 10 mm face, 5 mm D-shaft bore
-let gear_module = 1.0; // [0.5, 2.0] Module (mm)
+let gear_module = 1.0; // [0.7, 2.0] Module (mm)
 let teeth = 12; // [8, 20] Number of teeth
 let face = 10.0; // [4.0, 20.0] Face width (mm)
 let bore = 5.0; // [2.0, 8.0] Bore (mm)

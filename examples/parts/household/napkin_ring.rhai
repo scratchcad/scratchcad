@@ -1,6 +1,6 @@
 // Napkin ring: 45 mm OD, 38 mm ID, 30 mm wide, with a beaded edge and 12 oval cut-outs
-let outer_d = 45.0; // [35.0, 60.0] Outside diameter (mm)
-let inner_d = 38.0; // [28.0, 52.0] Inside diameter (mm)
+let outer_d = 45.0; // [39.0, 60.0] Outside diameter (mm)
+let inner_d = 38.0; // [28.0, 43.0] Inside diameter (mm)
 let width = 30.0; // [15.0, 45.0] Width (mm)
 let windows = 12; // [0, 20] Cut-outs
 let ring = cylinder(outer_d / 2.0, width) - cylinder([0, 0, -1], "Z", inner_d / 2.0, width + 2.0);

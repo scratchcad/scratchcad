@@ -1,5 +1,5 @@
 // Hexagon socket set screw ISO 4029 M4 x 6, cup point: 2 mm hex socket 2 mm deep, 2 mm cup diameter with a 118 deg cup, 0.7 mm pitch thread rings
-let diameter = 4.0; // [2.0, 16.0] Nominal diameter (mm)
+let diameter = 4.0; // [3.3, 16.0] Nominal diameter (mm)
 let length = 6.0; // [3.0, 40.0] Length (mm)
 let pitch = 0.7; // [0.4, 2.0] Thread pitch (mm)
 let socket = 2.0; // [0.9, 8.0] Hex socket across flats (mm)

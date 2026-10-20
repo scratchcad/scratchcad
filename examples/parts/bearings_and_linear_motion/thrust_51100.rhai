@@ -1,8 +1,8 @@
 // 51100 thrust ball bearing: 10 mm bore, 24 mm OD, 9 mm tall, two washers and a ball cage of 10 balls
-let bore = 10.0; // [6.0, 30.0] Bore (mm)
+let bore = 10.0; // [6.0, 22.0] Bore (mm)
 let outer = 24.0; // [16.0, 52.0] Outside diameter (mm)
 let height = 9.0; // [6.0, 18.0] Height (mm)
-let balls = 10; // [6, 18] Number of balls
+let balls = 10; // [8, 15] Number of balls
 let ball_d = height * 0.45;
 let washer_t = (height - ball_d) / 2.0 + ball_d * 0.2;
 let pitch_r = (bore + outer) / 4.0;

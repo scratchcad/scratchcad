@@ -1,6 +1,6 @@
 // Six-slot knife block: 120 x 100 mm footprint, body leaning back 20 deg, 230 mm long, slots 2.5 to 4 mm wide and 20 to 50 mm long, 200 mm deep, 10 mm corner radii
 let width = 120.0; // [80.0, 200.0] Block width (mm)
-let body_depth = 100.0; // [70.0, 150.0] Block depth front to back (mm)
+let body_depth = 100.0; // [82.0, 150.0] Block depth front to back (mm)
 let body_length = 230.0; // [150.0, 320.0] Block length along the slots (mm)
 let lean = 20.0; // [0.0, 35.0] Lean back from vertical (deg)
 let slot_depth = 200.0; // [100.0, 280.0] Slot depth (mm)

@@ -1,5 +1,5 @@
 // SI8T/K female rod end: 8 mm ball bore, 24 mm eye, 12 mm wide, M8 female thread, 42 mm from eye centre to end
-let ball_bore = 8.0; // [5.0, 20.0] Ball bore (mm)
+let ball_bore = 8.0; // [5.0, 15.2] Ball bore (mm)
 let eye_d = 24.0; // [16.0, 50.0] Eye diameter (mm)
 let width = 12.0; // [8.0, 25.0] Ball width (mm)
 let eye_t = 9.0; // [6.0, 20.0] Housing thickness (mm)

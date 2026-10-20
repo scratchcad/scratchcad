@@ -1,9 +1,9 @@
 // Rod end clevis DIN 71752 G 10x20: M10 female thread, 10 mm pin bore, 10 mm slot 20 mm deep, 20 mm square fork, 40 mm long, 16 mm hub
 let pin_bore = 10.0; // [4.0, 20.0] Pin bore (mm)
 let slot_width = 10.0; // [4.0, 20.0] Slot width (mm)
-let slot_depth = 20.0; // [8.0, 40.0] Slot depth (mm)
+let slot_depth = 20.0; // [8.0, 32.0] Slot depth (mm)
 let fork_width = 20.0; // [8.0, 40.0] Fork width (mm)
-let overall_length = 40.0; // [16.0, 80.0] Overall length (mm)
+let overall_length = 40.0; // [25.6, 80.0] Overall length (mm)
 let thread_diameter = 10.0; // [4.0, 20.0] Thread size (mm)
 const hub_length = 12.0;
 let half = fork_width / 2.0;

@@ -2,7 +2,7 @@
 let bore = 10.0; // [8.0, 22.0] Bore (mm)
 let outer = 30.0; // [22.0, 62.0] Outside diameter (mm)
 let width = 9.0; // [7.0, 16.0] Width (mm)
-let balls = 9; // [7, 14] Number of balls
+let balls = 9; // [8, 12] Number of balls
 let ball_d = (outer - bore) * 0.28;
 let pitch_r = (bore + outer) / 4.0;
 let groove = torus(pitch_r, ball_d / 2.0 + 0.05).translate([0, 0, width / 2.0]);

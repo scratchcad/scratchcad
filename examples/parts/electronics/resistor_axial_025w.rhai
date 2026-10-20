@@ -1,5 +1,5 @@
 // 1/4 W axial resistor: 6.3 x 2.4 mm body with end caps, 0.6 mm leads bent down at 10.16 mm pitch, 4 colour bands
-let body_l = 6.3; // [3.0, 12.0] Body length (mm)
+let body_l = 6.3; // [3.0, 9.7] Body length (mm)
 let body_d = 2.4; // [1.5, 5.0] Body diameter (mm)
 let pitch = 10.16; // [7.62, 20.32] Lead pitch (mm)
 let lead_d = 0.6; // [0.4, 0.8] Lead diameter (mm)

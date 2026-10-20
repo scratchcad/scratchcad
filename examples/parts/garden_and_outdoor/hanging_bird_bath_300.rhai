@@ -1,6 +1,6 @@
 // Hanging bird bath dish: 300 mm across, 40 mm deep, 4 mm wall, three 6 mm hanging lugs at 120 degrees
-let diameter = 300.0; // [200.0, 450.0] Dish diameter (mm)
-let depth = 40.0; // [25.0, 70.0] Dish depth (mm)
+let diameter = 300.0; // [240.0, 450.0] Dish diameter (mm)
+let depth = 40.0; // [25.0, 50.8] Dish depth (mm)
 let wall = 4.0; // [3.0, 8.0] Wall thickness (mm)
 let lug_hole = 6.0; // [3.0, 10.0] Hanging hole diameter (mm)
 let R = diameter / 2.0;

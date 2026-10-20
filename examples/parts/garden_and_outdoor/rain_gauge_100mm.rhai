@@ -2,7 +2,7 @@
 let collector = 100.0; // [70.0, 200.0] Collector diameter (mm)
 let tube_diameter = 30.0; // [20.0, 50.0] Measuring tube diameter (mm)
 let tube_height = 150.0; // [80.0, 250.0] Measuring tube height (mm)
-let wall = 1.5; // [1.0, 3.0] Wall thickness (mm)
+let wall = 1.5; // [1.4, 3.0] Wall thickness (mm)
 let R = collector / 2.0;
 let rt = tube_diameter / 2.0;
 let ztop = tube_height + 5.0;

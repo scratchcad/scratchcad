@@ -1,8 +1,8 @@
 // Hex reducing bushing 1 in male to 1/2 in female (NPT): 33.4 mm male, 26 mm hex 6 mm, 21.3 mm female bore 14 mm deep
-let male_d = 33.4; // [21.3, 60.3] Male thread diameter (mm)
+let male_d = 33.4; // [26.1, 60.3] Male thread diameter (mm)
 let male_l = 17.0; // [10.0, 30.0] Male thread length (mm)
 let hex = 36.0; // [24.0, 70.0] Hex size (mm)
-let female_d = 21.3; // [13.0, 48.0] Female diameter (mm)
+let female_d = 21.3; // [13.0, 30.9] Female diameter (mm)
 let rc = hex / sqrt(3.0);
 let pts = [];
 for i in 0..6 { let a = (i * 60 + 30).to_float() * PI() / 180.0; pts.push([rc * a.cos(), rc * a.sin()]); }

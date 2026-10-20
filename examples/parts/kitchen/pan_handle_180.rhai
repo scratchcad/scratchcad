@@ -1,9 +1,9 @@
 // Bakelite frying pan handle: 180 mm long, tapering from 24 x 18 mm at the pan to 32 x 22 mm at the end, 25 mm mounting boss with an M6 bolt bore, 8 mm hanging hole
 let length = 180.0; // [120.0, 250.0] Handle length (mm)
 let width_near = 24.0; // [16.0, 35.0] Width at the pan (mm)
-let width_far = 32.0; // [20.0, 45.0] Width at the end (mm)
-let thickness_near = 18.0; // [12.0, 28.0] Thickness at the pan (mm)
-let thickness_far = 22.0; // [14.0, 32.0] Thickness at the end (mm)
+let width_far = 32.0; // [20.0, 36.7] Width at the end (mm)
+let thickness_near = 18.0; // [12.0, 24.0] Thickness at the pan (mm)
+let thickness_far = 22.0; // [20.3, 32.0] Thickness at the end (mm)
 let hang_hole = 8.0; // [5.0, 12.0] Hanging hole diameter (mm)
 // elliptical section in the YZ plane at distance x
 fn ellipse_at(x, w, t) {

@@ -1,9 +1,9 @@
 // Camera cage cheese plate: 100 x 60 x 6 mm aluminium, 3/8-16 holes on a 20 mm grid with 1/4-20 holes between them (tap drill sizes), two 6.5 mm slots, 3 mm corner radii
 let length = 100.0; // [60.0, 200.0] Plate length (mm)
-let width = 60.0; // [40.0, 120.0] Plate width (mm)
+let width = 60.0; // [52.8, 96.0] Plate width (mm)
 let thickness = 6.0; // [4.0, 10.0] Plate thickness (mm)
-let grid = 20.0; // [15.0, 30.0] Hole grid pitch (mm)
-let corner_radius = 3.0; // [0.5, 8.0] Corner radius (mm)
+let grid = 20.0; // [17.0, 30.0] Hole grid pitch (mm)
+let corner_radius = 3.0; // [1.5, 8.0] Corner radius (mm)
 let plate = box_centered(length, width, thickness).translate([0, 0, thickness / 2.0]).fillet(corner_radius, "|Z").chamfer(0.5, ">Z or <Z");
 let nx = ((length - 10.0) / grid).floor().to_int() + 1;
 let ny = ((width - 10.0) / grid).floor().to_int() + 1;

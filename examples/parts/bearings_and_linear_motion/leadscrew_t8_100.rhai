@@ -1,7 +1,7 @@
 // T8 lead screw, 100 mm long, 8 mm lead with 4 starts (2 mm pitch), trapezoidal thread approximated by lofted ridges
-let length = 30.0; // [10.0, 100.0] Length shown (mm)
+let length = 30.0; // [10.0, 45.1] Length shown (mm)
 let starts = 4; // [1, 4] Thread starts
-let lead = 8.0; // [2.0, 12.0] Lead (mm)
+let lead = 8.0; // [5.8, 12.0] Lead (mm)
 let major = 8.0; // [6.0, 16.0] Major diameter (mm)
 let minor = 6.2; // [4.0, 13.0] Minor diameter (mm)
 // the core runs past the ridges at both ends, so no ridge ends inside it

@@ -1,6 +1,6 @@
 // Heat-set threaded insert M3 x 5.7 for plastics: 4.6 mm knurled OD in two bands of 12 ribs, 4.0 mm core, centre groove, tapered lead-in, 3.0 mm internal bore
-let thread_diameter = 3.0; // [2.0, 8.0] Thread size (mm)
-let outer_diameter = 4.6; // [3.0, 12.0] Knurl outer diameter (mm)
+let thread_diameter = 3.0; // [2.0, 3.2] Thread size (mm)
+let outer_diameter = 4.6; // [4.4, 12.0] Knurl outer diameter (mm)
 let length = 5.7; // [3.0, 15.0] Length (mm)
 const ribs = 12;
 let ro = max(outer_diameter / 2.0, thread_diameter / 2.0 + 0.6);

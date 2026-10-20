@@ -1,6 +1,6 @@
 // 0.56 in single-digit 7-segment display: 12.6 x 19 x 8 mm body, 7 slanted segments and a decimal point, 10 pins
 let width = 12.6; // [10.0, 20.0] Width (mm)
-let height = 19.0; // [15.0, 30.0] Height (mm)
+let height = 19.0; // [17.6, 25.6] Height (mm)
 let depth = 8.0; // [6.0, 12.0] Depth (mm)
 let body = box_centered(width, height, depth).translate([0, 0, depth / 2.0]);
 let seg_l = height * 0.35; let seg_w = 1.4;

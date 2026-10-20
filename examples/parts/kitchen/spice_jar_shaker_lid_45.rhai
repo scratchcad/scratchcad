@@ -1,5 +1,5 @@
 // Spice jar shaker fitment for a 45 mm jar mouth: 44 mm flange 1.5 mm thick, 38 mm push-in plug 6 mm deep with two sealing beads, nine 3 mm sifter holes on one half and a 16 x 22 mm spoon opening on the other
-let flange_diameter = 44.0; // [30.0, 70.0] Flange diameter (mm)
+let flange_diameter = 44.0; // [35.6, 70.0] Flange diameter (mm)
 let plug_diameter = 38.0; // [25.0, 60.0] Plug diameter (mm)
 let plug_depth = 6.0; // [3.0, 10.0] Plug depth (mm)
 let hole_diameter = 3.0; // [1.5, 5.0] Sifter hole diameter (mm)

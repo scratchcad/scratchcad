@@ -1,7 +1,7 @@
 // Planetary gear carrier: 50 mm disk 5 mm thick, 3 planet pins of 5 mm on a 30 mm circle, 10 mm output shaft
 let disk_d = 50.0; // [30.0, 120.0] Disk diameter (mm)
 let disk_t = 5.0; // [3.0, 12.0] Disk thickness (mm)
-let pin_circle = 30.0; // [16.0, 90.0] Planet pin circle (mm)
+let pin_circle = 30.0; // [16.0, 51.6] Planet pin circle (mm)
 let pin_d = 5.0; // [3.0, 12.0] Pin diameter (mm)
 let pin_l = 12.0; // [6.0, 30.0] Pin length (mm)
 let planets = 3; // [2, 6] Planets

@@ -1,6 +1,6 @@
 // Self-watering plant pot, 120 mm: tapered pot 120 mm at the top, 90 mm at the base, 110 mm tall, 2 mm wall, wicking holes, on a 25 mm deep reservoir saucer
-let top_diameter = 120.0; // [80.0, 200.0] Pot top diameter (mm)
-let base_diameter = 90.0; // [60.0, 160.0] Pot base diameter (mm)
+let top_diameter = 120.0; // [96.0, 200.0] Pot top diameter (mm)
+let base_diameter = 90.0; // [60.0, 115.2] Pot base diameter (mm)
 let height = 110.0; // [60.0, 200.0] Pot height (mm)
 let wall = 2.0; // [1.5, 4.0] Wall thickness (mm)
 let reservoir = 25.0; // [10.0, 50.0] Reservoir depth (mm)

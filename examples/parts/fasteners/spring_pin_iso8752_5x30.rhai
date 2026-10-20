@@ -1,7 +1,7 @@
 // Slotted spring pin ISO 8752 5 x 30, heavy duty: 5.3 mm free diameter, 1.0 mm wall, 1.2 mm slot along the length, 30 mm long, both ends chamfered
 let diameter = 5.3; // [1.2, 21.0] Free outer diameter (mm)
 let length = 30.0; // [4.0, 120.0] Length (mm)
-let wall = 1.0; // [0.2, 4.0] Wall thickness (mm)
+let wall = 1.0; // [0.5, 4.0] Wall thickness (mm)
 let slot = 1.2; // [0.3, 4.0] Slot width (mm)
 let r = diameter / 2.0;
 let w = min(wall, r * 0.45);

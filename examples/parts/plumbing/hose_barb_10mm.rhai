@@ -1,6 +1,6 @@
 // Hose barb 10 mm to 1/4 in BSP: three barbs 11.5 mm on a 9 mm stem, 17 mm hex, 6 mm bore
 let barb_d = 11.5; // [5.0, 30.0] Barb diameter (mm)
-let stem_d = 9.0; // [4.0, 26.0] Stem diameter (mm)
+let stem_d = 9.0; // [7.2, 26.0] Stem diameter (mm)
 let barbs = 3; // [2, 5] Barbs
 let hex = 17.0; // [10.0, 36.0] Hex size (mm)
 let thread_d = 13.16; // [9.7, 26.4] Thread diameter (mm)

@@ -1,6 +1,6 @@
 // Taper-lock bush 1210 for a 25 mm shaft: 25.4 mm long, 8 deg included taper from 47.6 mm, 8 mm keyway, axial split, two half-thread holes 3/8 in BSW
-let bore = 25.0; // [11.0, 32.0] Bore diameter (mm)
-let large_diameter = 47.6; // [35.0, 60.0] Large end diameter (mm)
+let bore = 25.0; // [11.0, 29.2] Bore diameter (mm)
+let large_diameter = 47.6; // [43.0, 60.0] Large end diameter (mm)
 let length = 25.4; // [15.0, 40.0] Length (mm)
 const taper = 8.0;
 const screw = 8.6;

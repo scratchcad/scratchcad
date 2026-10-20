@@ -1,5 +1,5 @@
 // Desk organizer tray: 200 x 100 x 40 mm, 2 mm walls, three compartments of 50 / 70 / 80 mm, finger scoop
-let length = 200.0; // [100.0, 300.0] Length (mm)
+let length = 200.0; // [140.0, 300.0] Length (mm)
 let width = 100.0; // [60.0, 160.0] Width (mm)
 let height = 40.0; // [20.0, 80.0] Height (mm)
 let wall = 2.0; // [1.2, 4.0] Wall thickness (mm)

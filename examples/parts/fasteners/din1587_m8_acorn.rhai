@@ -1,7 +1,7 @@
 // DIN 1587 M8 domed cap (acorn) nut: 13 mm AF, 15 mm overall height, 6.5 mm thread depth
-let across_flats = 13.0; // [7.0, 30.0] Width across flats (mm)
-let hex_h = 6.5; // [3.0, 15.0] Hex height (mm)
-let height = 15.0; // [8.0, 35.0] Overall height (mm)
+let across_flats = 13.0; // [9.4, 16.7] Width across flats (mm)
+let hex_h = 6.5; // [3.0, 8.4] Hex height (mm)
+let height = 15.0; // [12.5, 35.0] Overall height (mm)
 let bore = 6.8; // [3.0, 20.0] Tap drill diameter (mm)
 let rc = across_flats / sqrt(3.0);
 let pts = [];

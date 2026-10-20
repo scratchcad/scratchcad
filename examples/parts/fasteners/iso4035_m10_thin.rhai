@@ -1,7 +1,7 @@
 // ISO 4035 M10 thin hex nut: 16 mm AF, 5 mm thick, chamfered both faces
-let across_flats = 16.0; // [7.0, 30.0] Width across flats (mm)
+let across_flats = 16.0; // [10.6, 30.0] Width across flats (mm)
 let thickness = 5.0; // [2.5, 12.0] Thickness (mm)
-let bore = 8.5; // [4.0, 20.0] Bore (minor diameter) (mm)
+let bore = 8.5; // [4.0, 15.4] Bore (minor diameter) (mm)
 let rc = across_flats / sqrt(3.0);
 let pts = [];
 for i in 0..6 { let a = (i * 60 + 30).to_float() * PI() / 180.0; pts.push([rc * a.cos(), rc * a.sin()]); }
