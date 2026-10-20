@@ -5,7 +5,7 @@
 name = "scratchcad-occt-sys"
 description = "Rust bindings to the OpenCascade CAD Kernel, with C++ exception handling"
 license = "LGPL-2.1-only"
-version = "0.2.0"
+version = "0.4.0"
 edition = "2021"
 repository = "https://github.com/scratchcad/scratchcad"
 readme = "README.md"
