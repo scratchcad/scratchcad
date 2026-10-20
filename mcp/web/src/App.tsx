@@ -150,7 +150,7 @@ export default function App() {
       if (wanted) {
         void load(wanted).then((ok) => ok && setDrawer((d) => (d === "files" ? null : d)));
       } else {
-        notify("error", `${linked.current} isn't in the output directory.`);
+        notify("error", `There is no ${linked.current} in the output directory.`);
       }
       linked.current = null;
       return;
