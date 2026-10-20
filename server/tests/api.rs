@@ -259,6 +259,43 @@ async fn validate_warns_about_shapes_without_solids() {
     assert!(w.starts_with("the shape has no solids"), "{w}");
 }
 
+/// A thread lofted onto a core whose surface its root edge only touches: the fuse returns an
+/// invalid shape that can't be meshed.
+const UNMESHABLE: &str = r#"
+let section = polygon([[2.0866, 0, -0.4167], [2.3866, 0, -0.4167], [3.0, 0, -0.0625],
+                       [3.0, 0, 0.0625], [2.3866, 0, 0.4167], [2.0866, 0, 0.4167]]);
+let sections = [];
+for i in 0..=252 {
+    let t = i.to_float() / 12.0;
+    sections.push(section.rotate_z(t * 360.0).translate([0, 0, t - 1.0]));
+}
+cylinder([0, 0, -0.5], "Z", 2.3866, 20.5) + loft(sections, true)
+"#;
+
+#[tokio::test]
+async fn mesh_failures_say_what_may_have_caused_them() {
+    let app = app();
+    for (uri, body) in [
+        (
+            "/v1/raster/3d",
+            json!({ "script": UNMESHABLE, "width": 32, "height": 32 }),
+        ),
+        (
+            "/v1/raster/2d",
+            json!({ "script": UNMESHABLE, "width": 32, "height": 32 }),
+        ),
+        ("/v1/export/stl", json!({ "script": UNMESHABLE })),
+    ] {
+        let r = post(&app, uri, body).await;
+        assert_eq!(r.0, StatusCode::UNPROCESSABLE_ENTITY, "{uri}");
+        let m = error_message(&r);
+        assert!(
+            m.contains("This may be why: OpenCASCADE's checker reports"),
+            "{uri}: {m}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn script_errors() {
     let app = app();

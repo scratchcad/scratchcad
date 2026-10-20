@@ -269,7 +269,9 @@ impl Raster2dRequest {
         } else {
             ctx.set_stage(Stage::Meshing);
             let max_triangles = ctx.settings.max_mesh_triangles;
-            let welded = mesh::mesh(&c.shape, tolerance, max_triangles)?.welded();
+            let welded = mesh::mesh(&c.shape, tolerance, max_triangles)
+                .map_err(|e| explain_mesh_failure(e, &c.shape))?
+                .welded();
             let segments = render::section(&welded);
             if segments.is_empty() {
                 warnings.push(format!(
@@ -365,7 +367,8 @@ impl Raster3dRequest {
         let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
         ctx.set_stage(Stage::Meshing);
         let max_triangles = ctx.settings.max_mesh_triangles;
-        let scene = scene(&c.shape, tolerance, max_triangles, self.edges)?;
+        let scene = scene(&c.shape, tolerance, max_triangles, self.edges)
+            .map_err(|e| explain_mesh_failure(e, &c.shape))?;
         ctx.set_stage(Stage::Rendering);
         let view = View3d {
             width: w,
@@ -383,6 +386,18 @@ impl Raster3dRequest {
             ms: ms_since(start),
         };
         Output::new(&rendered, png)
+    }
+}
+
+/// A failed mesh, saying when the shape fails OpenCASCADE's checker, which is the usual reason:
+/// meshing itself only says that a face failed.
+fn explain_mesh_failure(e: ApiError, shape: &Shape) -> ApiError {
+    match e {
+        ApiError::MeshFailed(message) if !shape.is_valid() => ApiError::MeshFailed(format!(
+            "{message}. This may be why: OpenCASCADE's checker reports the shape as invalid; look \
+             for faces that only touch or nearly coincide, or call validate_script for details"
+        )),
+        other => other,
     }
 }
 
@@ -496,7 +511,8 @@ impl ExportRequest {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
         let (bytes, mesh, warnings) = if format.is_mesh() {
-            export_mesh(ctx, &c.shape, format, self.tolerance)?
+            export_mesh(ctx, &c.shape, format, self.tolerance)
+                .map_err(|e| explain_mesh_failure(e, &c.shape))?
         } else {
             ctx.set_stage(Stage::Exporting);
             (export::exact(&c.shape, format)?, None, vec![])
@@ -589,6 +605,15 @@ pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mesh_failures_of_valid_shapes_are_left_alone() {
+        let cube = Shape::cube(1.0).unwrap();
+        let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &cube);
+        assert!(matches!(e, ApiError::MeshFailed(m) if m == "meshing failed"));
+        let e = explain_mesh_failure(ApiError::BadRequest("x".into()), &cube);
+        assert!(matches!(e, ApiError::BadRequest(m) if m == "x"));
+    }
 
     #[test]
     fn validators() {
