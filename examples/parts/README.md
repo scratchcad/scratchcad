@@ -211,7 +211,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 
 The first 779 parts were made with the fixes in #61 to #75, and with them every one validated,
 rendered and saved without warnings, except `assorted/flex_coupler`, which is measured
-approximately and says so. On main at 508fa1a, 748 of those 779 build cleanly. The other 31 hit
+approximately and says so. On main at 508fa1a, 747 of those 779 build cleanly. The other 32 hit
 the bugs those PRs fix:
 
 | part | on main |
@@ -247,6 +247,14 @@ the bugs those PRs fix:
 | [`medical_and_bathroom/button_hook_dressing_aid`](medical_and_bathroom/button_hook_dressing_aid.rhai) | could not be measured (#44) |
 | [`marine_and_music/boat_propeller_3_blade`](marine_and_music/boat_propeller_3_blade.rhai) | loft failed (#50) |
 | [`marine_and_music/d_shackle_8mm`](marine_and_music/d_shackle_8mm.rhai) | reported invalid after measuring (#42, #43) |
+| [`office_and_sports/carabiner_keychain`](office_and_sports/carabiner_keychain.rhai) | the frame, swept along a polyline, comes out valid but almost empty, leaving only the gate (#81) |
+
+A later check found three of them silently wrong on main because they cut with a compound of
+overlapping tools (#58): `kitchen/honey_dipper` came out as a sliver of 2.6% of its volume, and
+`aquarium_and_irrigation/seed_tray_insert_6cell` and `desk_organisers/aa_battery_caddy_12` missed
+their drain holes. They now cut with `fuse_all`, which is right on main and with the fix. A sweep
+of every slider to its minimum and maximum on main also narrowed the ranges that broke there,
+including ones that crash the worker (#45, #82).
 
 Parts added after that were made on main itself, working around its bugs the way an agent would
 have to, and build there without warnings. The bugs they ran into are filed from #76 on.
