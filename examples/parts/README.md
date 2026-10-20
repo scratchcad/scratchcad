@@ -1,6 +1,6 @@
 # Parts
 
-2641 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2647 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -76,6 +76,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`furniture_and_home_hardware`](furniture_and_home_hardware) | 42 |
 | [`furniture_repair`](furniture_repair) | 5 |
 | [`garage_and_motorcycle`](garage_and_motorcycle) | 41 |
+| [`garage_doors_and_gates`](garage_doors_and_gates) | 6 |
 | [`garage_storage`](garage_storage) | 8 |
 | [`garden_and_outdoor`](garden_and_outdoor) | 40 |
 | [`gears_and_power_transmission`](gears_and_power_transmission) | 28 |
