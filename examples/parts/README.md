@@ -1,6 +1,6 @@
 # Parts
 
-2013 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2025 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -66,6 +66,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`ham_radio`](ham_radio) | 8 |
 | [`hardware`](hardware) | 28 |
 | [`hobby_electronics_enclosures`](hobby_electronics_enclosures) | 41 |
+| [`home_brewing`](home_brewing) | 6 |
 | [`home_decor`](home_decor) | 14 |
 | [`household`](household) | 28 |
 | [`hvac_electrical_and_solar`](hvac_electrical_and_solar) | 41 |
@@ -105,6 +106,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`robotics_and_makers`](robotics_and_makers) | 40 |
 | [`sailing_dinghy_fittings`](sailing_dinghy_fittings) | 6 |
 | [`sewing_and_crafts`](sewing_and_crafts) | 20 |
+| [`shipping_and_logistics`](shipping_and_logistics) | 6 |
 | [`smart_home`](smart_home) | 7 |
 | [`sports_and_fitness`](sports_and_fitness) | 40 |
 | [`surveying_and_layout`](surveying_and_layout) | 6 |
