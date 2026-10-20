@@ -1,6 +1,6 @@
 # Parts
 
-2364 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
+2377 Rhai scripts for real-world parts, from bearings and bike cranks to lab glassware and
 chess pieces. Each was written by hand by a Claude agent working through scratchcad's MCP
 tools: the agent wrote the script, checked it with `validate_script` and `render_3d`, fixed its
 own mistakes, and saved it with `save_script`, as it would for a user. Nothing here was produced
@@ -41,6 +41,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`bicycle_accessories`](bicycle_accessories) | 6 |
 | [`blinds_and_curtains`](blinds_and_curtains) | 15 |
 | [`books_and_reading`](books_and_reading) | 10 |
+| [`calligraphy_and_pens`](calligraphy_and_pens) | 6 |
 | [`camping_and_hiking`](camping_and_hiking) | 19 |
 | [`car_interior`](car_interior) | 7 |
 | [`caravan_and_motorhome`](caravan_and_motorhome) | 8 |
@@ -139,6 +140,7 @@ The main dimensions are sliders in the editor. To open a part there, copy it int
 | [`tools`](tools) | 40 |
 | [`toys_and_games`](toys_and_games) | 39 |
 | [`tractor_and_mower_spares`](tractor_and_mower_spares) | 6 |
+| [`trailers_and_towing`](trailers_and_towing) | 7 |
 | [`tripod_accessories`](tripod_accessories) | 5 |
 | [`vacuum_cleaner_spares`](vacuum_cleaner_spares) | 5 |
 | [`watersports`](watersports) | 9 |
