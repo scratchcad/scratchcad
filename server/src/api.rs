@@ -271,7 +271,9 @@ impl Raster2dRequest {
         } else {
             ctx.set_stage(Stage::Meshing);
             let max_triangles = ctx.settings.max_mesh_triangles;
-            let welded = mesh::mesh(&c.shape, tolerance, max_triangles)?.welded();
+            let welded = mesh::mesh(&c.shape, tolerance, max_triangles)
+                .map_err(|e| explain_mesh_failure(e, &c))?
+                .welded();
             let segments = render::section(&welded);
             if segments.is_empty() {
                 warnings.push(format!(
@@ -367,7 +369,8 @@ impl Raster3dRequest {
         let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
         ctx.set_stage(Stage::Meshing);
         let max_triangles = ctx.settings.max_mesh_triangles;
-        let mut scene = scene(&c.shape, tolerance, max_triangles, self.edges)?;
+        let mut scene = scene(&c.shape, tolerance, max_triangles, self.edges)
+            .map_err(|e| explain_mesh_failure(e, &c))?;
         scene.warnings.splice(0..0, c.warnings.iter().cloned());
         ctx.set_stage(Stage::Rendering);
         let view = View3d {
@@ -387,6 +390,28 @@ impl Raster3dRequest {
         };
         Output::new(&rendered, png)
     }
+}
+
+/// A failed mesh, saying when the shape fails OpenCASCADE's checker, which is the usual reason,
+/// and adding the notes the script's operations recorded, such as a boolean that returned an
+/// invalid shape: meshing itself only says which face failed.
+fn explain_mesh_failure(e: ApiError, c: &Compiled) -> ApiError {
+    let ApiError::MeshFailed(mut message) = e else {
+        return e;
+    };
+    if !c.shape.is_valid() {
+        message.push_str(
+            ". This may be why: OpenCASCADE's checker reports the shape as invalid; look for \
+             faces that only touch or nearly coincide, or call validate_script for details",
+        );
+    }
+    if !c.warnings.is_empty() {
+        message.push_str(&format!(
+            ". Earlier in the script: {}",
+            c.warnings.join("; ")
+        ));
+    }
+    ApiError::MeshFailed(message)
 }
 
 /// What a 3D render draws
@@ -499,7 +524,8 @@ impl ExportRequest {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
         let (bytes, mesh, format_warnings) = if format.is_mesh() {
-            export_mesh(ctx, &c.shape, format, self.tolerance)?
+            export_mesh(ctx, &c.shape, format, self.tolerance)
+                .map_err(|e| explain_mesh_failure(e, &c))?
         } else {
             ctx.set_stage(Stage::Exporting);
             (export::exact(&c.shape, format)?, None, vec![])
@@ -594,6 +620,29 @@ pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mesh_failures_of_valid_shapes_are_left_alone() {
+        let mut cube = Compiled {
+            shape: Shape::cube(1.0).unwrap(),
+            output: vec![],
+            script_ms: 0.0,
+            warnings: vec![],
+        };
+        let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &cube);
+        assert!(matches!(e, ApiError::MeshFailed(m) if m == "meshing failed"));
+        let e = explain_mesh_failure(ApiError::BadRequest("x".into()), &cube);
+        assert!(matches!(e, ApiError::BadRequest(m) if m == "x"));
+        // The script's notes still go with it.
+        cube.warnings
+            .push("line 1, position 5: the fuse left them as separate solids".into());
+        let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &cube);
+        assert!(matches!(
+            e,
+            ApiError::MeshFailed(m) if m == "meshing failed. Earlier in the script: line 1, \
+                position 5: the fuse left them as separate solids"
+        ));
+    }
 
     #[test]
     fn validators() {
