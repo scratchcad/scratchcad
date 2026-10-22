@@ -1413,6 +1413,7 @@ impl Shape {
             Err(Error::InvalidArgument(_)) => return exact,
             _ => {},
         }
+        crate::cancel::check()?;
         match self.offset_face(distance, true) {
             Ok(face) if face.is_valid() => Ok(face),
             Err(error @ Error::InvalidArgument(_)) => Err(error),
