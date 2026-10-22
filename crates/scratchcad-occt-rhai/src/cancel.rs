@@ -104,6 +104,20 @@ pub(crate) fn check() -> Result<(), Error> {
     }
 }
 
+/// `result`, or when it failed, what `retry` gives; but no retry once the current token has been
+/// cancelled, as it would start work only to abandon it, or finish it anyway where the algorithm
+/// can't be interrupted.
+pub(crate) fn or_retry<T>(
+    result: Result<T, Error>,
+    retry: impl FnOnce() -> Result<T, Error>,
+) -> Result<T, Error> {
+    match result {
+        Err(Error::Cancelled) => Err(Error::Cancelled),
+        Err(_) => check().and_then(|()| retry()),
+        ok => ok,
+    }
+}
+
 /// A progress range for one OpenCASCADE algorithm. Under [`with_cancel`] the algorithm polls the
 /// scope's token through it; otherwise it cannot be interrupted.
 pub(crate) struct Progress {
@@ -168,6 +182,19 @@ mod tests {
             assert!(check().is_ok());
         });
         assert!(current_token().is_none());
+    }
+
+    #[test]
+    fn retries_stop_at_a_cancel() {
+        let retried = |result: Result<i32, Error>| or_retry(result, || Ok(2));
+        assert_eq!(retried(Ok(1)), Ok(1));
+        assert_eq!(retried(Err(Error::OperationFailed("x"))), Ok(2));
+        assert_eq!(retried(Err(Error::Cancelled)), Err(Error::Cancelled));
+        let token = CancelToken::new();
+        token.cancel();
+        with_cancel(&token, || {
+            assert_eq!(retried(Err(Error::OperationFailed("x"))), Err(Error::Cancelled));
+        });
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! The [`Shape`] handle and every operation on it.
 
 use crate::{
-    cancel::{failed, progress},
+    cancel::{failed, or_retry, progress},
     error::{invalid, Error, Result},
     math::{
         self, axis1, axis2, fmt_vec, from_pnt, from_vec, point, require_finite,
@@ -1017,7 +1017,7 @@ impl Shape {
     /// that fails or gives an invalid shape (it does on helices whose pitch changes, which
     /// `BRepOffsetAPI_MakePipe` even crashed on), by the plain Frenet frame, which follows curves
     /// faithfully but is undefined on straight runs. Sharp corners in the path are mitred.
-    /// `BRepOffsetAPI_MakePipe` is the last resort.
+    /// `BRepOffsetAPI_MakePipe` is the last resort. A cancel ends the retries.
     fn pipe(spine: &Shape, profile: &Shape, solid: bool) -> Result<Self> {
         let attempt = |frenet: bool| -> Result<Self> {
             let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakePipeShell_new(spine.wire()?)?;
@@ -1034,7 +1034,8 @@ impl Shape {
             }
             Ok(swept)
         };
-        attempt(false).or_else(|_| attempt(true)).or_else(|_| {
+        let shell = or_retry(attempt(false), || attempt(true));
+        or_retry(shell, || {
             // Some paths that turn a corner into an arc only BRepOffsetAPI_MakePipe follows; its
             // result is only taken when valid and not partly inside out, as it can be garbage
             // (or crash) where the above worked.
@@ -1161,7 +1162,7 @@ impl Shape {
             }
             Self::from_algorithm(make.pin_mut().Shape()?)
         };
-        attempt(true).or_else(|_| attempt(false))
+        or_retry(attempt(true), || attempt(false))
     }
 
     fn require_edges(&self, edges: &[Shape], what: &str) -> Result<()> {
