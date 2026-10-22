@@ -57,7 +57,7 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 |----------|---------|
 | booleans | `fuse`/`union`/`+`, `cut`/`-`, `common`/`intersect`/`&`, `section` |
 | transforms | `translate(v)`, `translate(x, y, z)`, `rotate(axis, deg)`, `rotate(origin, axis, deg)`, `rotate_x/y/z(deg)`, `scale(f)`, `scale(center, f)`, `mirror(plane_or_normal)`, `mirror(origin, normal)` |
-| features | `extrude(distance)` (along the face normal), `extrude(vector)`, `revolve(axis, deg)`, `revolve(origin, axis, deg)`, `sweep(path)`, `fillet(r)`, `fillet(r, edges)`, `chamfer(d)`, `chamfer(d, edges)`, `shell(t)`, `shell(t, open_faces)`, `offset(d)` (2D; a face keeps its holes), `clean()`, `to_face()` |
+| features | `extrude(distance)` (along the face normal; see [Sketches](#sketches)), `extrude(vector)`, `revolve(axis, deg)`, `revolve(origin, axis, deg)`, `sweep(path)`, `fillet(r)`, `fillet(r, edges)`, `chamfer(d)`, `chamfer(d, edges)`, `shell(t)`, `shell(t, open_faces)`, `offset(d)` (2D; a face keeps its holes), `clean()`, `to_face()` |
 | exploration | `faces()`, `edges()`, `vertices()`, `wires()`, `shells()`, `solids()`, `faces(sel)`, `edges(sel)`, `vertices(sel)`, `face(sel)`, `edge(sel)`, `vertex(sel)`, `top_face()`, `bottom_face()`, `children()` |
 | measurement | `volume()`, `area()`, `length()`, `center()`, `bounding_box()`, `distance(other)`, `closest_points(other)`, `contains(point)`, `classify(point)` (`"inside"`, `"outside"` or `"on"` the solids), `is_valid()`, `is_closed()`, `shape_type()`, `is_same(other)`, `==` |
 | edges, faces, vertices | `point()`, `start_point()`, `end_point()`, `point_at(t)`, `tangent_at(t)`, `radius()`, `geom_type()`, `normal()`, `plane()` (a sketch plane on a planar face), `outer_wire()` |
@@ -102,6 +102,14 @@ profile.translate([20, 0, 0]).revolve("Z", 360)
 
 Pen moves: `move_to(x, y)` (before drawing), `line_to(x, y)`, `line(dx, dy)`, `hline(dx)`,
 `vline(dy)`, `hline_to(x)`, `vline_to(y)`, `polar_line(length, deg)`, `arc_to(mx, my, x, y)`.
+
+`extrude(distance)` goes along a face's normal. Outlines drawn on a plane (closed sketches,
+`rect`, `circle`, `polygon(plane, points)`, and `polygon(points)` whose points all lie at one
+height) run counter-clockwise about the plane's normal whichever way round they were drawn, so
+their faces extrude to the plane's positive side: +Z for `"XY"`, -Y for `"XZ"`. Other outlines
+face the way their winding points (counter-clockwise seen from the side they face); give
+`extrude([0, 0, h])` a vector to be sure of the direction.
+
 Use a face as a sketch plane with `face.plane()`:
 
 ```rhai

@@ -22,6 +22,47 @@ impl Segment {
     }
 }
 
+/// The area a closed path from `start` encloses: positive when it runs counter-clockwise.
+fn signed_area(start: DVec2, segments: &[Segment]) -> f64 {
+    let mut area = 0.0;
+    let mut from = start;
+    for segment in segments {
+        let to = segment.end();
+        area += from.perp_dot(to) / 2.0;
+        if let Segment::Arc { mid, .. } = *segment {
+            // The circular segment between the chord and the arc adds to the area when the arc
+            // bulges to the right of the chord. Seen from `mid`, the chord spans half the angle
+            // the rest of the circle does.
+            let inscribed = (from - mid).angle_to(to - mid).abs();
+            let sweep = 2.0 * (std::f64::consts::PI - inscribed);
+            let radius = from.distance(to) / (2.0 * inscribed.sin());
+            let bulge = radius * radius / 2.0 * (sweep - sweep.sin());
+            area += if (to - from).perp_dot(mid - from) < 0.0 { bulge } else { -bulge };
+        }
+        from = to;
+    }
+    area
+}
+
+/// The closed path from `start` drawn the other way round.
+fn reversed(start: DVec2, segments: &[Segment]) -> Vec<Segment> {
+    let mut from = start;
+    let mut starts = Vec::with_capacity(segments.len());
+    for segment in segments {
+        starts.push(from);
+        from = segment.end();
+    }
+    segments
+        .iter()
+        .zip(starts)
+        .rev()
+        .map(|(segment, from)| match *segment {
+            Segment::Line { .. } => Segment::Line { end: from },
+            Segment::Arc { mid, .. } => Segment::Arc { mid, end: from },
+        })
+        .collect()
+}
+
 /// A 2D path of lines and arcs, drawn in the coordinates of a [`Plane`].
 ///
 /// Every method returns a new sketch (the segment list is shared until modified), so a sketch
@@ -161,6 +202,10 @@ impl Sketch {
 
     /// The path closed back to its starting point, as a closed wire. A closing line is added
     /// unless the pen is already at the start.
+    ///
+    /// The wire runs counter-clockwise in the plane: a path drawn clockwise is drawn backwards
+    /// instead. A face made from it then faces along the plane's normal, so `extrude(distance)`
+    /// goes to the plane's positive side whichever way round the path was drawn.
     pub fn close(&self) -> Result<Shape> {
         let mut segments = (*self.segments).clone();
         if self.position().distance(self.start) > EPSILON {
@@ -171,6 +216,9 @@ impl Sketch {
             return Err(invalid(
                 "a closed sketch needs at least 3 lines (or 2 segments with an arc)",
             ));
+        }
+        if signed_area(self.start, &segments) < 0.0 {
+            segments = reversed(self.start, &segments);
         }
         Shape::wire_from(&self.edges(&segments)?)
     }

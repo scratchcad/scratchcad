@@ -536,8 +536,21 @@ impl Shape {
     }
 
     /// A closed wire of straight segments through the points (the closing segment is added
-    /// automatically unless the last point equals the first).
+    /// automatically unless the last point equals the first). Points that all lie at one height
+    /// are taken counter-clockwise seen from +Z, as [`polygon_on`](Self::polygon_on) takes them
+    /// in the XY plane, so a face made from them faces up whichever way round they were listed.
     pub fn polygon(points: &[DVec3]) -> Result<Self> {
+        if let Some(first) = points.first() {
+            if points.iter().all(|p| (p.z - first.z).abs() < EPSILON) {
+                let plane = Plane::xy().translated(DVec3::new(0.0, 0.0, first.z));
+                let flat: Vec<DVec2> = points.iter().map(|p| p.truncate()).collect();
+                return Self::polygon_on(&plane, &flat);
+            }
+        }
+        Self::polygon_through(points)
+    }
+
+    fn polygon_through(points: &[DVec3]) -> Result<Self> {
         let mut points = points.to_vec();
         if points.len() > 1 && points[0].distance(points[points.len() - 1]) < EPSILON {
             points.pop();
@@ -549,9 +562,18 @@ impl Shape {
         Self::polyline(&points)
     }
 
-    /// A polygon given in the coordinates of `plane`.
+    /// A polygon given in the coordinates of `plane`. It runs counter-clockwise in the plane
+    /// (points listed clockwise are taken the other way round), so a face made from it faces
+    /// along the plane's normal and `extrude(distance)` goes to the plane's positive side.
     pub fn polygon_on(plane: &Plane, points: &[DVec2]) -> Result<Self> {
-        Self::polygon(&points.iter().map(|p| plane.to_world(*p)).collect::<Vec<_>>())
+        let mut points = points.to_vec();
+        if points.len() > 1 && points[0].distance(points[points.len() - 1]) < EPSILON {
+            points.pop();
+        }
+        if math::signed_area(&points) < 0.0 {
+            points[1..].reverse();
+        }
+        Self::polygon_through(&points.iter().map(|p| plane.to_world(*p)).collect::<Vec<_>>())
     }
 
     /// A `width` × `height` rectangle centered on the plane's origin.

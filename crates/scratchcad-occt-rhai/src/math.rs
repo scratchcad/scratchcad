@@ -92,6 +92,12 @@ pub fn parse_direction(name: &str) -> Result<DVec3> {
     Ok(unit * sign)
 }
 
+/// The area the polygon through `points` encloses: positive when they run counter-clockwise.
+pub(crate) fn signed_area(points: &[DVec2]) -> f64 {
+    let next = points.iter().cycle().skip(1);
+    points.iter().zip(next).map(|(a, b)| a.perp_dot(*b)).sum::<f64>() / 2.0
+}
+
 /// Normalizes `v`, failing on zero or non-finite vectors.
 pub fn normalize(v: DVec3) -> Result<DVec3> {
     if !v.is_finite() || v.length() < EPSILON {
