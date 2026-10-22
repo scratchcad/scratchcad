@@ -38,6 +38,9 @@ pub struct Compiled {
     pub output: Vec<String>,
     /// Time spent executing the script, in milliseconds
     pub script_ms: f64,
+    /// Operations in the script that succeeded with a suspect result, such as a boolean that
+    /// returned an invalid shape, with where in the script they are
+    pub warnings: Vec<String>,
 }
 
 type Output = Rc<RefCell<Vec<String>>>;
@@ -98,6 +101,8 @@ pub fn compile(src: &str, limits: &ScriptLimits) -> Result<Compiled, ApiError> {
     let start = Instant::now();
     let output = Output::default();
     let mut engine = engine(limits, output.clone());
+    // Notes are per thread; drop any an earlier script left behind.
+    scratchcad_occt_rhai::take_notes();
 
     let drawn: Rc<RefCell<Option<Shape>>> = Rc::default();
     let slot = drawn.clone();
@@ -127,12 +132,14 @@ pub fn compile(src: &str, limits: &ScriptLimits) -> Result<Compiled, ApiError> {
         .map_err(|e| ApiError::Script(e.to_string()))?;
     let result = engine
         .eval_ast::<Dynamic>(&ast)
-        .map_err(|e| map_eval_error(*e, limits))?;
+        .map_err(|e| with_notes(map_eval_error(*e, limits)))?;
 
     let drawn = drawn.borrow_mut().take();
     let shape = match drawn {
         Some(shape) => shape,
-        None if is_shaped(&result) => to_shape(result).map_err(|e| map_eval_error(*e, limits))?,
+        None if is_shaped(&result) => {
+            to_shape(result).map_err(|e| with_notes(map_eval_error(*e, limits)))?
+        }
         None => {
             return Err(ApiError::Script(format!(
                 "script must call draw(shape) or evaluate to a shape, \
@@ -142,11 +149,11 @@ pub fn compile(src: &str, limits: &ScriptLimits) -> Result<Compiled, ApiError> {
         }
     };
     if shape.vertices().is_empty() {
-        return Err(ApiError::Unprocessable(format!(
+        return Err(with_notes(ApiError::Unprocessable(format!(
             "the script produced an empty {} with no faces, edges or vertices; \
              a boolean may have removed everything",
             shape.shape_type()
-        )));
+        ))));
     }
 
     let output = std::mem::take(&mut *output.borrow_mut());
@@ -154,7 +161,23 @@ pub fn compile(src: &str, limits: &ScriptLimits) -> Result<Compiled, ApiError> {
         shape,
         output,
         script_ms: start.elapsed().as_secs_f64() * 1e3,
+        warnings: scratchcad_occt_rhai::take_notes(),
     })
+}
+
+/// Adds the notes the script's operations recorded (see `scratchcad_occt_rhai::take_notes`) to
+/// the error that stopped it: a boolean that went wrong earlier often explains a later failure.
+fn with_notes(e: ApiError) -> ApiError {
+    let notes = scratchcad_occt_rhai::take_notes();
+    if notes.is_empty() {
+        return e;
+    }
+    let earlier = format!(". Earlier in the script: {}", notes.join("; "));
+    match e {
+        ApiError::Script(m) => ApiError::Script(format!("{m}{earlier}")),
+        ApiError::Unprocessable(m) => ApiError::Unprocessable(format!("{m}{earlier}")),
+        other => other,
+    }
 }
 
 fn map_eval_error(e: EvalAltResult, limits: &ScriptLimits) -> ApiError {
@@ -248,6 +271,47 @@ mod tests {
         assert!(m.contains("invalid argument"), "{m}");
         let m = script_error("cube(1).edges(\"bogus[\")");
         assert!(m.contains("selector"), "{m}");
+    }
+
+    /// A thread start running out past both ends of its core, which OpenCASCADE fuses into two
+    /// overlapping solids without an error or a warning.
+    const GRAZING: &str = r#"
+        let section = polygon([[2.7, 0, -0.6], [3.05, 0, -0.6], [4.0, 0, -0.3], [4.0, 0, 0.3],
+                               [3.05, 0, 0.6], [2.7, 0, 0.6]]);
+        let sections = [];
+        for i in 0..=60 {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0 + 180.0).translate([0, 0, -8.0 + t * 8.0]));
+        }
+        let joined = cylinder([0, 0, -0.5], "Z", 3.1, 31.0) + loft(sections, true);
+    "#;
+
+    #[test]
+    fn errors_carry_notes_from_earlier_operations() {
+        let failed = |src: String| match run(&src) {
+            Err(ApiError::Script(m) | ApiError::Unprocessable(m)) => m,
+            Err(other) => panic!("{other}"),
+            Ok(_) => panic!("should fail"),
+        };
+        let m = failed(format!("{GRAZING} throw \"boom\";"));
+        assert!(
+            m.contains("boom (line 10, position 6). Earlier in the script: line 9"),
+            "{m}"
+        );
+        assert!(
+            m.contains("the fuse left them as separate, overlapping solids"),
+            "{m}"
+        );
+        let m = failed(format!(
+            "{GRAZING} joined & box(1, 1, 1).translate([50, 0, 0])"
+        ));
+        assert!(
+            m.contains("empty compound") && m.contains("Earlier in the script"),
+            "{m}"
+        );
+        // Notes don't outlive the script that made them.
+        assert!(run("box(1, 1, 1)").unwrap().warnings.is_empty());
+        assert!(matches!(run("let x = ;"), Err(ApiError::Script(m)) if !m.contains("Earlier")));
     }
 
     #[test]

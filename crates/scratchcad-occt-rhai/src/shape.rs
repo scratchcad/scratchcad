@@ -670,12 +670,147 @@ impl Shape {
 
     /// Runs a boolean operation in OpenCASCADE's non-destructive mode, which leaves both
     /// arguments unmodified.
+    ///
+    /// A boolean can succeed and still return an invalid shape (where faces only touch or
+    /// nearly coincide, say), which later operations then mangle or drop without an error. A
+    /// healthy boolean raises no warnings, so when one does, the result is checked, and an invalid
+    /// one is recorded as a note (see [`take_notes`](crate::take_notes)).
     fn boolean(&self, other: &Shape, name: &'static str, run: BooleanFn) -> Result<UniquePtr<Raw>> {
-        let result = run(self.raw(), other.raw(), &progress())?;
+        let mut warnings = String::new();
+        let result = run(self.raw(), other.raw(), &progress(), &mut warnings)?;
         if result.is_null() {
             return Err(failed(name));
         }
+        if !warnings.is_empty() && !valid(&result) {
+            crate::notes::note(invalid_boolean(name, &warnings));
+        } else if let Some(problem) = self.volume_problem(other, name, &result)? {
+            crate::notes::note(problem);
+        }
         Ok(result)
+    }
+
+    /// What is wrong with a boolean's result whose volume no correct result could have: a fuse
+    /// smaller than one of the solids it fused, or a cut or common larger than the solids it was
+    /// cut from. OpenCASCADE returns such results without an error or a warning where faces graze
+    /// or nearly coincide (a lofted thread ridge running out past the end of its core lost the
+    /// core's volume to it). The volumes come first from integrating the solids directly, which is
+    /// fast and usually within a percent or so, but can be far off on long B-spline lofts (30% on
+    /// a 42-turn thread groove). A volume that looks impossible is measured again exactly, on
+    /// copies, as measuring splits faces in place, and noted only if it still is.
+    fn volume_problem(&self, other: &Shape, name: &str, result: &Raw) -> Result<Option<String>> {
+        let volumes = |shape: &Shape| -> Result<Vec<f64>> {
+            shape.solids().iter().map(|s| Ok(s.volume_props()?.Mass().abs())).collect()
+        };
+        let (a, b) = (volumes(self)?, volumes(other)?);
+        if a.is_empty() || b.is_empty() || name == "section" {
+            return Ok(None);
+        }
+        let result = Self::from_raw(result)?;
+        let got = result.volume_props()?.Mass().abs();
+        if let Some(problem) = impossible_volume(name, got, &a, &b) {
+            // Where the shapes can't be measured exactly, the direct integration stands.
+            let confirmed = self.exact_volume_problem(other, name, &result);
+            if let Some(problem) = confirmed.unwrap_or(Some(problem)) {
+                return Ok(Some(problem));
+            }
+        }
+        // OpenCASCADE can also miss that two solids meet at all, and then fuse them into a
+        // compound of the two overlapping solids, cut nothing, or find nothing in common. Where a
+        // result looks like that, a point on an edge of either shape strictly inside the other
+        // proves they did overlap.
+        // A cut that missed can still split faces along where the shapes meet, which moves the
+        // integrated volume by a few parts in 1e8 (a helical groove cut from a cylinder), so
+        // "removed nothing" means less than a millionth of the smaller side.
+        let (sum_a, sum_b) = (a.iter().sum::<f64>(), b.iter().sum::<f64>());
+        let untouched = match name {
+            "fuse" => result.solids().len() == a.len() + b.len(),
+            "cut" => (got - sum_a).abs() <= 1e-6 * sum_a.min(sum_b),
+            _ => result.solids().is_empty(),
+        };
+        // A cut can also go the other way and remove everything, although part of the shape lies
+        // outside the tool: a point on its edges strictly outside the tool proves that.
+        if name == "cut" && result.solids().is_empty() && self.reaches_outside(other)? {
+            return Ok(Some(format!(
+                "the cut removed everything, although part of the shape lies outside what it was \
+                 cut by: OpenCASCADE's boolean went wrong, which happens where faces graze or \
+                 nearly coincide. Make the tool clearly smaller or clearly larger than the shape \
+                 where their faces meet ({sum_a:.6} and {sum_b:.6} of volume)"
+            )));
+        }
+        if untouched && (self.reaches_into(other)? || other.reaches_into(self)?) {
+            let missed = match name {
+                "fuse" => "left them as separate, overlapping solids",
+                "cut" => "removed nothing",
+                _ => "found nothing in common",
+            };
+            return Ok(Some(format!(
+                "the {name} {missed}, although the shapes overlap (an edge of one passes inside the \
+                 other): OpenCASCADE's boolean missed where they meet, which happens where faces \
+                 graze or nearly coincide. Make the shapes overlap clearly, and make tools run \
+                 past the ends of what they join or cut rather than ending inside or flush with it \
+                 ({:.6} and {:.6} of volume)",
+                sum_a, sum_b
+            )));
+        }
+        Ok(None)
+    }
+
+    /// [`impossible_volume`] of a boolean `name` of this shape and `other` that gave `result`,
+    /// measured exactly on copies of the three.
+    fn exact_volume_problem(
+        &self,
+        other: &Shape,
+        name: &str,
+        result: &Shape,
+    ) -> Result<Option<String>> {
+        let exact = |shape: &Shape| -> Result<Vec<f64>> {
+            shape.solids().iter().map(|s| s.deep_copy()?.volume()).collect()
+        };
+        let got = result.deep_copy()?.volume()?;
+        Ok(impossible_volume(name, got, &exact(self)?, &exact(other)?))
+    }
+
+    /// Whether a point of this shape's edges lies strictly outside all of `other`'s solids, which
+    /// means some of this shape lies outside `other` (see [`Shape::reaches_into`]).
+    fn reaches_outside(&self, other: &Shape) -> Result<bool> {
+        for p in self.edge_samples()? {
+            if other.classify(p)? == PointLocation::Outside {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Points on this shape's edges: its vertices, and points along each edge.
+    fn edge_samples(&self) -> Result<Vec<DVec3>> {
+        let mut points: Vec<DVec3> =
+            self.vertices().iter().map(|v| v.point()).collect::<Result<_>>()?;
+        for edge in self.edges().iter() {
+            // Degenerate edges (at the poles of a sphere) have no curve to sample.
+            points.extend((1..8).filter_map(|k| edge.point_at(k as f64 / 8.0).ok()));
+        }
+        Ok(points)
+    }
+
+    /// Whether a point of this shape's edges (its vertices, and points along each edge) lies
+    /// strictly inside one of `other`'s solids, which means the two overlap: near a point of its
+    /// boundary, a shape has points of its own inside the other too. Each point is only tried
+    /// against the solids whose bounding boxes hold it.
+    fn reaches_into(&self, other: &Shape) -> Result<bool> {
+        let mut targets = vec![];
+        for solid in other.solids().iter() {
+            if let Ok(bounds) = solid.bounding_box() {
+                targets.push((solid.clone(), bounds));
+            }
+        }
+        for p in self.edge_samples()? {
+            for (solid, bounds) in &targets {
+                if bounds.contains(p) && solid.classify(p)? == PointLocation::Inside {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// The union of both shapes.
@@ -1380,7 +1515,7 @@ impl Shape {
 
     /// Whether OpenCASCADE's checker considers the shape topologically and geometrically valid.
     pub fn is_valid(&self) -> bool {
-        ffi::b_rep_check::BRepCheck_Analyzer_new(self.raw()).map(|a| a.IsValid()).unwrap_or(false)
+        valid(self.raw())
     }
 
     /// Whether an edge, wire or shell is closed. Solids are always closed.
@@ -1632,7 +1767,61 @@ type BooleanFn = fn(
     &Raw,
     &Raw,
     &ffi::message::Message_ProgressRange,
+    &mut String,
 ) -> std::result::Result<UniquePtr<Raw>, cxx::Exception>;
+
+fn valid(shape: &Raw) -> bool {
+    ffi::b_rep_check::BRepCheck_Analyzer_new(shape).map(|a| a.IsValid()).unwrap_or(false)
+}
+
+/// What is wrong with a boolean `name` ("fuse", "cut" or "common") that returned a volume of
+/// `got` from arguments whose solids have the volumes `a` and `b`, if no correct result could
+/// have that volume.
+fn impossible_volume(name: &str, got: f64, a: &[f64], b: &[f64]) -> Option<String> {
+    let largest = a.iter().chain(b).fold(0.0f64, |m, v| m.max(*v));
+    let (sum_a, sum_b) = (a.iter().sum::<f64>(), b.iter().sum::<f64>());
+    let expected = match name {
+        "fuse" if got < 0.95 * largest => {
+            format!("at least {largest:.6}, the volume of the largest solid it fused")
+        },
+        "cut" if got > 1.05 * sum_a => format!("at most {sum_a:.6}, the volume it cut from"),
+        "common" if got > 1.05 * sum_a.min(sum_b) => {
+            format!("at most {:.6}, the volume of the smaller side", sum_a.min(sum_b))
+        },
+        _ => return None,
+    };
+    Some(format!(
+        "the {name} returned a volume of {got:.6} where it must be {expected}: OpenCASCADE's \
+         boolean went wrong without an error, which happens where faces graze or nearly \
+         coincide. Make the shapes overlap clearly, and make tools run past the ends of what they \
+         join or cut rather than ending inside or flush with it"
+    ))
+}
+
+/// The note for a boolean that returned an invalid shape, given the warnings it raised, such as
+/// "BOPAlgo_AlertAcquiredSelfIntersection,BOPAlgo_AlertTooSmallEdge".
+fn invalid_boolean(name: &str, warnings: &str) -> String {
+    let words: Vec<String> = warnings
+        .split(',')
+        .map(|w| {
+            let w = w.trim_start_matches("BOPAlgo_Alert");
+            let mut out = String::new();
+            for (i, c) in w.chars().enumerate() {
+                if c.is_uppercase() && i > 0 {
+                    out.push(' ');
+                }
+                out.extend(c.to_lowercase());
+            }
+            out
+        })
+        .collect();
+    format!(
+        "the {name} returned an invalid shape (OpenCASCADE reported: {}), which later operations \
+         may mangle or silently drop. This usually comes from faces that only touch or nearly \
+         coincide: make the shapes overlap clearly, by a few hundredths of a millimetre or more",
+        words.join(", ")
+    )
+}
 
 /// An exception from `operation`, or [`Error::Cancelled`] when it was asked to stop.
 fn occt_error(operation: &str, exception: cxx::Exception) -> Error {
@@ -1736,6 +1925,19 @@ impl fmt::Display for BoundingBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn impossible_boolean_volumes() {
+        assert_eq!(impossible_volume("fuse", 10.0, &[8.0], &[4.0]), None);
+        let fuse = impossible_volume("fuse", 7.0, &[8.0], &[4.0]).unwrap();
+        assert!(fuse.contains("a volume of 7.000000 where it must be at least 8.000000"), "{fuse}");
+        assert_eq!(impossible_volume("cut", 8.0, &[8.0], &[4.0]), None);
+        let cut = impossible_volume("cut", 9.0, &[8.0], &[4.0]).unwrap();
+        assert!(cut.contains("at most 8.000000, the volume it cut from"), "{cut}");
+        assert_eq!(impossible_volume("common", 4.1, &[8.0], &[2.0, 2.0]), None);
+        let common = impossible_volume("common", 5.0, &[8.0], &[2.0, 2.0]).unwrap();
+        assert!(common.contains("at most 4.000000, the volume of the smaller side"), "{common}");
+    }
     use ffi::geom_abs::{GeomAbs_CurveType as C, GeomAbs_SurfaceType as S};
 
     #[test]

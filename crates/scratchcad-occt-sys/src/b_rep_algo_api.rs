@@ -76,32 +76,38 @@ mod inner {
 
         // One-shot booleans in OpenCASCADE's non-destructive ("safe processing") mode: the
         // arguments are never modified, and the operation stops early when `progress` asks it
-        // to. The result is null when the operation fails.
+        // to. The result is null when the operation fails. `warnings` gets the names of the
+        // warnings the operation raised, separated by commas: a healthy boolean raises none.
         pub fn BRepAlgoAPI_fuse(
             a: &TopoDS_Shape,
             b: &TopoDS_Shape,
             progress: &Message_ProgressRange,
+            warnings: &mut String,
         ) -> Result<UniquePtr<TopoDS_Shape>>;
         /// Fuses `a` with every child of the compound `tools` in one operation.
         pub fn BRepAlgoAPI_fuse_children(
             a: &TopoDS_Shape,
             tools: &TopoDS_Shape,
             progress: &Message_ProgressRange,
+            warnings: &mut String,
         ) -> Result<UniquePtr<TopoDS_Shape>>;
         pub fn BRepAlgoAPI_cut(
             a: &TopoDS_Shape,
             b: &TopoDS_Shape,
             progress: &Message_ProgressRange,
+            warnings: &mut String,
         ) -> Result<UniquePtr<TopoDS_Shape>>;
         pub fn BRepAlgoAPI_common(
             a: &TopoDS_Shape,
             b: &TopoDS_Shape,
             progress: &Message_ProgressRange,
+            warnings: &mut String,
         ) -> Result<UniquePtr<TopoDS_Shape>>;
         pub fn BRepAlgoAPI_section(
             a: &TopoDS_Shape,
             b: &TopoDS_Shape,
             progress: &Message_ProgressRange,
+            warnings: &mut String,
         ) -> Result<UniquePtr<TopoDS_Shape>>;
     }
 }

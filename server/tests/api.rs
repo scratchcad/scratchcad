@@ -259,6 +259,63 @@ async fn validate_warns_about_shapes_without_solids() {
     assert!(w.starts_with("the shape has no solids"), "{w}");
 }
 
+/// A thread fused onto a core whose surface its root edge only touches: the fuse returns an
+/// invalid shape, and the common after it drops it, leaving a valid shape behind.
+const SILENTLY_BROKEN: &str = r#"
+let r_major = 3.0;
+let r_minor = 2.3866;
+let w = 0.4167;
+let section = polygon([[r_minor - 0.3, 0, -w], [r_minor, 0, -w], [r_major, 0, -0.0625],
+                       [r_major, 0, 0.0625], [r_minor, 0, w], [r_minor - 0.3, 0, w]]);
+let sections = [];
+for i in 0..=252 {
+    let t = i.to_float() / 12.0;
+    sections.push(section.rotate_z(t * 360.0).translate([0, 0, t - 1.0]));
+}
+let core = cylinder([0, 0, -0.5], "Z", r_minor, 20.5);
+let threaded = core + loft(sections, true);
+cylinder(1, 1).translate([0, 0, 30]) + (threaded & cylinder(4, 20))
+"#;
+
+#[tokio::test]
+async fn warns_about_booleans_that_returned_invalid_shapes() {
+    let app = app();
+    let (_, b) = post_ok(
+        &app,
+        "/v1/scripts/validate",
+        json!({ "script": SILENTLY_BROKEN }),
+    )
+    .await;
+    let v = json_body(&b);
+    assert_eq!(v["shape"]["valid"], true);
+    let w = v["warnings"][0].as_str().unwrap();
+    assert!(
+        w.starts_with("line 13, position 21: the fuse returned an invalid shape"),
+        "{w}"
+    );
+    let (h, _) = post_ok(
+        &app,
+        "/v1/raster/3d",
+        json!({ "script": SILENTLY_BROKEN, "width": 32, "height": 32 }),
+    )
+    .await;
+    assert!(warnings(&h)[0].contains("the fuse returned an invalid shape"));
+    let (h, _) = post_ok(
+        &app,
+        "/v1/raster/2d",
+        json!({ "script": SILENTLY_BROKEN, "width": 32, "height": 32 }),
+    )
+    .await;
+    assert!(warnings(&h)[0].contains("the fuse returned an invalid shape"));
+    let (h, _) = post_ok(
+        &app,
+        "/v1/export/brep",
+        json!({ "script": SILENTLY_BROKEN }),
+    )
+    .await;
+    assert!(warnings(&h)[0].contains("the fuse returned an invalid shape"));
+}
+
 #[tokio::test]
 async fn script_errors() {
     let app = app();

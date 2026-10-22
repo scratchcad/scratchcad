@@ -73,13 +73,18 @@ fn brep_round_trip_in_memory() {
 fn non_destructive_booleans() {
     let a = make_box(2.0, 2.0, 2.0);
     let b = make_box_at(1.0, 1.0, 1.0, 2.0, 2.0, 2.0);
-    let fuse = b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, &progress()).unwrap();
+    // A healthy boolean raises no warnings.
+    let mut warnings = String::from("stale");
+    let fuse = b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, &progress(), &mut warnings).unwrap();
+    assert_eq!(warnings, "");
     assert_close(volume(&fuse), 15.0, 1e-9);
-    let cut = b_rep_algo_api::BRepAlgoAPI_cut(&a, &b, &progress()).unwrap();
+    let cut = b_rep_algo_api::BRepAlgoAPI_cut(&a, &b, &progress(), &mut String::new()).unwrap();
     assert_close(volume(&cut), 7.0, 1e-9);
-    let common = b_rep_algo_api::BRepAlgoAPI_common(&a, &b, &progress()).unwrap();
+    let common =
+        b_rep_algo_api::BRepAlgoAPI_common(&a, &b, &progress(), &mut String::new()).unwrap();
     assert_close(volume(&common), 1.0, 1e-9);
-    let section = b_rep_algo_api::BRepAlgoAPI_section(&a, &b, &progress()).unwrap();
+    let section =
+        b_rep_algo_api::BRepAlgoAPI_section(&a, &b, &progress(), &mut String::new()).unwrap();
     assert!(unique_count(&section, TopAbs_ShapeEnum::TopAbs_EDGE) > 0);
     // The arguments keep their original volumes.
     assert_close(volume(&a), 8.0, 1e-9);
@@ -95,7 +100,8 @@ fn non_destructive_booleans() {
     builder.Add(tools.pin_mut(), &b).unwrap();
     builder.Add(tools.pin_mut(), &make_box_at(2.0, 2.0, 2.0, 1.0, 1.0, 1.0)).unwrap();
     builder.Add(tools.pin_mut(), &make_box_at(10.0, 0.0, 0.0, 1.0, 1.0, 1.0)).unwrap();
-    let all = b_rep_algo_api::BRepAlgoAPI_fuse_children(&a, &tools, &progress()).unwrap();
+    let all = b_rep_algo_api::BRepAlgoAPI_fuse_children(&a, &tools, &progress(), &mut String::new())
+        .unwrap();
     assert_close(volume(&all), 16.0, 1e-9);
     assert_eq!(unique_count(&all, TopAbs_ShapeEnum::TopAbs_SOLID), 2);
 }
@@ -150,14 +156,16 @@ fn cancellable_progress_stops_algorithms() {
     // SAFETY: `flag` outlives `running`.
     let running = unsafe { message::Message_CancellableProgress_new(&flag) };
     let range = message::Message_CancellableProgress_range(&running);
-    assert!(!b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range).unwrap().is_null());
+    assert!(!b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range, &mut String::new())
+        .unwrap()
+        .is_null());
 
     flag.cancel();
     assert!(flag.is_cancelled());
     // SAFETY: `flag` outlives `stopped`.
     let stopped = unsafe { message::Message_CancellableProgress_new(&flag) };
     let range = message::Message_CancellableProgress_range(&stopped);
-    assert!(b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range).unwrap().is_null());
+    assert!(b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range, &mut String::new()).unwrap().is_null());
 }
 
 #[test]

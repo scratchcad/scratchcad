@@ -701,3 +701,133 @@ fn bundled_examples_run() {
     }
     assert!(count >= 4);
 }
+
+#[test]
+fn notes_booleans_that_return_invalid_shapes() {
+    // A thread lofted onto a core whose surface its root edge only touches: the fuse "succeeds",
+    // but returns an invalid shape, and a later common silently drops it.
+    let script = r#"
+        let r_major = 3.0;
+        let r_minor = 2.3866;
+        let w = 0.4167;
+        let section = polygon([[r_minor - 0.3, 0, -w], [r_minor, 0, -w], [r_major, 0, -0.0625],
+                               [r_major, 0, 0.0625], [r_minor, 0, w], [r_minor - 0.3, 0, w]]);
+        let sections = [];
+        for i in 0..=252 {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0).translate([0, 0, t - 1.0]));
+        }
+        let core = cylinder([0, 0, -0.5], "Z", r_minor, 20.5);
+        let threaded = core + loft(sections, true);
+        cylinder(1, 1).translate([0, 0, 30]) + (threaded & cylinder(4, 20.0))
+    "#;
+    scratchcad_occt_rhai::take_notes();
+    let shape = eval_shape(script).unwrap();
+    assert!(shape.is_valid());
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(
+        notes[0].starts_with("line 13, position 29: the fuse returned an invalid shape"),
+        "{notes:?}"
+    );
+    assert!(notes[0].contains("acquired self intersection"), "{notes:?}");
+    // The common that then dropped it is noted too.
+    assert!(notes[1].starts_with("line 14, position 58: the common found nothing"), "{notes:?}");
+    assert!(scratchcad_occt_rhai::take_notes().is_empty());
+
+    // Healthy booleans, including one fusing shapes that share a face, note nothing.
+    run::<Shape>("(box(2, 2, 2) + box(1, 1, 1).translate([2, 0, 0])) - cylinder(0.5, 9)");
+    assert!(scratchcad_occt_rhai::take_notes().is_empty());
+}
+
+/// One start of a 4-start T8 lead screw thread running out past both ends of its core:
+/// OpenCASCADE misses that they meet, and fuses them into a compound of the two overlapping
+/// solids without an error or a warning.
+pub const GRAZING_FUSE: &str = r#"
+    let section = polygon([[2.7, 0, -0.6], [3.05, 0, -0.6], [4.0, 0, -0.3], [4.0, 0, 0.3],
+                           [3.05, 0, 0.6], [2.7, 0, 0.6]]);
+    let sections = [];
+    for i in 0..=60 {
+        let t = i.to_float() / 12.0;
+        sections.push(section.rotate_z(t * 360.0 + 180.0).translate([0, 0, -8.0 + t * 8.0]));
+    }
+    let core = cylinder([0, 0, -0.5], "Z", 3.1, 31.0);
+    core + loft(sections, true)
+"#;
+
+#[test]
+fn notes_booleans_that_lose_volume() {
+    scratchcad_occt_rhai::take_notes();
+    let shape = eval_shape(GRAZING_FUSE).unwrap();
+    assert!(shape.is_valid());
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].starts_with("line 10, position 10: the fuse left them as separate, overlapping"),
+        "{notes:?}"
+    );
+    // The common misses the overlap too.
+    eval_shape(&GRAZING_FUSE.replace("core + loft", "core.translate([0, 0, 0]) & loft")).ok();
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert!(notes[0].contains("the common found nothing in common"), "{notes:?}");
+}
+
+#[test]
+fn does_not_note_booleans_of_long_lofts_it_measures_roughly() {
+    // A 42-turn SM1 thread groove cut to length: integrated directly, the common's volume came
+    // out 30% too high, 2020.9 against at most 1545.8, though its exact volume is 1540.7.
+    let script = r#"
+        const pitch = 0.635;
+        const r_major = 13.1445;
+        let r_minor = r_major - 0.541 * pitch;
+        let w = pitch / 16.0 + (r_major + 0.05 - (r_minor - 0.05)) * (30.0 * PI() / 180.0).tan();
+        let section = polygon([[r_minor - 0.6, 0, -w], [r_minor - 0.05, 0, -w], [r_major + 0.05, 0, -pitch / 16.0],
+                               [r_major + 0.05, 0, pitch / 16.0], [r_minor - 0.05, 0, w], [r_minor - 0.6, 0, w]]);
+        let sections = [];
+        for i in 0..=(42 * 12) {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0).translate([0, 0, t * pitch]));
+        }
+        loft(sections, true).translate([0, 0, -pitch]) & cylinder(20.0, 27.4)
+    "#;
+    scratchcad_occt_rhai::take_notes();
+    let groove = eval_shape(script).unwrap();
+    assert!(groove.is_valid());
+    assert_close(groove.volume().unwrap(), 1540.68, 0.01);
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+#[test]
+fn notes_cuts_that_remove_nothing() {
+    // A helical groove lofted as a square section: OpenCASCADE's cut split the cylinder's faces
+    // where the groove meets them, but removed none of its 148 mm³.
+    let script = r#"
+        let r = 13.0;
+        let s = polygon([[r - 0.8, 0, -0.3], [r + 0.5, 0, -0.3], [r + 0.5, 0, 0.3], [r - 0.8, 0, 0.3]]);
+        let a = [];
+        for i in 0..=36 { let t = i.to_float() / 12.0; a.push(s.rotate_z(t * 360.0).translate([0, 0, t * 1.5])); }
+        cylinder(r, 4.0) - loft(a, true)
+    "#;
+    scratchcad_occt_rhai::take_notes();
+    eval_shape(script).unwrap();
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert!(notes[0].starts_with("line 6, position 26: the cut removed nothing"), "{notes:?}");
+}
+
+#[test]
+fn notes_cuts_that_remove_everything() {
+    // A duct and its inside, lofted through three sections each: OpenCASCADE's cut of one from
+    // the other came out empty.
+    let script = r#"
+        let outer = loft([rect(plane([0, 0, 25], "Z"), 20, 15), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 22, 9),
+                          rect(plane([0, 12, 0], [0, 1, 0.5]), 30, 3)], true);
+        let inner = loft([rect(plane([0, 0, 26.01], "Z"), 17.6, 12.6), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 19.6, 6.6),
+                          rect(plane([0, 12.5, -0.25], [0, 1, 0.5]), 27.6, 0.6)], true);
+        outer - inner
+    "#;
+    scratchcad_occt_rhai::take_notes();
+    assert!(eval_shape(script).unwrap().solids().is_empty());
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert!(notes[0].starts_with("line 6, position 15: the cut removed everything"), "{notes:?}");
+}

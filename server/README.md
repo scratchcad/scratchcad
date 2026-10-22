@@ -103,7 +103,10 @@ curl -s localhost:8080/v1/scripts/validate -H 'content-type: application/json' \
 
 `valid` is OpenCASCADE's checker's verdict. `warnings` names what will cause
 trouble later: an invalid shape, or one with no solids (a face or wire where a
-solid was probably meant). An invalid script returns the same `422` error the
+solid was probably meant), and booleans in the script that returned an invalid
+shape, with their line (a later operation can drop the damaged part and leave a
+valid shape that is missing it). The renders and exports report those booleans
+in their `x-warning` headers too. An invalid script returns the same `422` error the
 other endpoints would.
 
 `volume`, `area` and `center` are exact to about 1e-7 of their size, also on
