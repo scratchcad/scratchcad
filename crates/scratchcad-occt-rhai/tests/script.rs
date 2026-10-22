@@ -767,6 +767,32 @@ fn notes_booleans_that_lose_volume() {
 }
 
 #[test]
+fn does_not_note_booleans_of_long_lofts_it_measures_roughly() {
+    // A 42-turn SM1 thread groove cut to length: integrated directly, the common's volume came
+    // out 30% too high, 2020.9 against at most 1545.8, though its exact volume is 1540.7.
+    let script = r#"
+        const pitch = 0.635;
+        const r_major = 13.1445;
+        let r_minor = r_major - 0.541 * pitch;
+        let w = pitch / 16.0 + (r_major + 0.05 - (r_minor - 0.05)) * (30.0 * PI() / 180.0).tan();
+        let section = polygon([[r_minor - 0.6, 0, -w], [r_minor - 0.05, 0, -w], [r_major + 0.05, 0, -pitch / 16.0],
+                               [r_major + 0.05, 0, pitch / 16.0], [r_minor - 0.05, 0, w], [r_minor - 0.6, 0, w]]);
+        let sections = [];
+        for i in 0..=(42 * 12) {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0).translate([0, 0, t * pitch]));
+        }
+        loft(sections, true).translate([0, 0, -pitch]) & cylinder(20.0, 27.4)
+    "#;
+    scratchcad_occt_rhai::take_notes();
+    let groove = eval_shape(script).unwrap();
+    assert!(groove.is_valid());
+    assert_close(groove.volume().unwrap(), 1540.68, 0.01);
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert!(notes.is_empty(), "{notes:?}");
+}
+
+#[test]
 fn notes_cuts_that_remove_nothing() {
     // A helical groove lofted as a square section: OpenCASCADE's cut split the cylinder's faces
     // where the groove meets them, but removed none of its 148 mm³.

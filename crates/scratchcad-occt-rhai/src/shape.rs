@@ -671,8 +671,10 @@ impl Shape {
     /// smaller than one of the solids it fused, or a cut or common larger than the solids it was
     /// cut from. OpenCASCADE returns such results without an error or a warning where faces graze
     /// or nearly coincide (a lofted thread ridge running out past the end of its core lost the
-    /// core's volume to it). The volumes come from integrating the solids directly: fast, and
-    /// within a percent or so even on B-spline faces, so a 5% margin keeps correct results clear.
+    /// core's volume to it). The volumes come first from integrating the solids directly, which is
+    /// fast and usually within a percent or so, but can be far off on long B-spline lofts (30% on
+    /// a 42-turn thread groove). A volume that looks impossible is measured again exactly, on
+    /// copies, as measuring splits faces in place, and noted only if it still is.
     fn volume_problem(&self, other: &Shape, name: &str, result: &Raw) -> Result<Option<String>> {
         let volumes = |shape: &Shape| -> Result<Vec<f64>> {
             shape.solids().iter().map(|s| Ok(s.volume_props()?.Mass().abs())).collect()
@@ -684,7 +686,11 @@ impl Shape {
         let result = Self::from_raw(result)?;
         let got = result.volume_props()?.Mass().abs();
         if let Some(problem) = impossible_volume(name, got, &a, &b) {
-            return Ok(Some(problem));
+            // Where the shapes can't be measured exactly, the direct integration stands.
+            let confirmed = self.exact_volume_problem(other, name, &result);
+            if let Some(problem) = confirmed.unwrap_or(Some(problem)) {
+                return Ok(Some(problem));
+            }
         }
         // OpenCASCADE can also miss that two solids meet at all, and then fuse them into a
         // compound of the two overlapping solids, cut nothing, or find nothing in common. Where a
@@ -725,6 +731,21 @@ impl Shape {
             )));
         }
         Ok(None)
+    }
+
+    /// [`impossible_volume`] of a boolean `name` of this shape and `other` that gave `result`,
+    /// measured exactly on copies of the three.
+    fn exact_volume_problem(
+        &self,
+        other: &Shape,
+        name: &str,
+        result: &Shape,
+    ) -> Result<Option<String>> {
+        let exact = |shape: &Shape| -> Result<Vec<f64>> {
+            shape.solids().iter().map(|s| s.deep_copy()?.volume()).collect()
+        };
+        let got = result.deep_copy()?.volume()?;
+        Ok(impossible_volume(name, got, &exact(self)?, &exact(other)?))
     }
 
     /// Whether a point of this shape's edges lies strictly outside all of `other`'s solids, which
