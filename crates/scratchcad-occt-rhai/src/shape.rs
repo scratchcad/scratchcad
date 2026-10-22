@@ -678,10 +678,12 @@ impl Shape {
     /// Runs a boolean operation in OpenCASCADE's non-destructive mode, which leaves both
     /// arguments unmodified.
     ///
-    /// A boolean can succeed and still return an invalid shape (where faces only touch or
-    /// nearly coincide, say), which later operations then mangle or drop without an error. A
-    /// healthy boolean raises no warnings, so when one does, the result is checked, and an invalid
-    /// one is recorded as a note (see [`take_notes`](crate::take_notes)).
+    /// A boolean can succeed and still return a wrong shape, which later operations then mangle
+    /// or drop without an error. Two kinds are recorded as notes (see
+    /// [`take_notes`](crate::take_notes)): an invalid result of a boolean that raised warnings (a
+    /// healthy one raises none), and a result whose volume shows the boolean went wrong (see
+    /// [`volume_problem`](Self::volume_problem)). The checks only add notes: one that can't run
+    /// leaves the result as it is.
     fn boolean(&self, other: &Shape, name: &'static str, run: BooleanFn) -> Result<UniquePtr<Raw>> {
         let mut warnings = String::new();
         let result = run(self.raw(), other.raw(), &progress(), &mut warnings)?;
@@ -690,8 +692,12 @@ impl Shape {
         }
         if !warnings.is_empty() && !valid(&result) {
             crate::notes::note(invalid_boolean(name, &warnings));
-        } else if let Some(problem) = self.volume_problem(other, name, &result)? {
-            crate::notes::note(problem);
+        } else {
+            match self.volume_problem(other, name, &result) {
+                Ok(Some(problem)) => crate::notes::note(problem),
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                Ok(None) | Err(_) => {},
+            }
         }
         Ok(result)
     }
