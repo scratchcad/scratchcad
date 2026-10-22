@@ -848,3 +848,12 @@ fn circles_along_a_helix_start_on_top() {
     let flat = Shape::circle(DVec3::ZERO, DVec3::Z, 2.0).unwrap();
     assert_vec_close(flat.edges().first().unwrap().start_point().unwrap(), v(2.0, 0.0, 0.0), 1e-9);
 }
+
+#[test]
+fn vectors_index_like_arrays() {
+    assert_close(run::<f64>("let v = vec3(1, 2, 3); v[0] + v[1] * 10 + v[-1] * 100"), 321.0, 0.0);
+    assert_close(run::<f64>("let v = box(1, 2, 3).bounding_box().max; v[2]"), 3.0, 1e-6);
+    assert_close(run::<f64>("let v = vec3(1, 2, 3); v[1] = 7; v.y"), 7.0, 0.0);
+    fails("vec3(1, 2, 3)[3]", "components 0 to 2");
+    fails("let v = vec3(1, 2, 3); v[-4] = 1", "components 0 to 2");
+}

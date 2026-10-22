@@ -29,6 +29,7 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
   a real error. (Kind 8, file and format errors, only comes from the Rust API.)
 * **Numbers** may be integers or floats. **Angles** are in degrees.
 * **Vectors** are `vec3(x, y, z)` values or arrays (`[x, y, z]`, or `[x, y]` with `z = 0`).
+  A `vec3` has `.x`, `.y` and `.z`, and indexes like an array (`v[2]`, `v[-1]`).
   **Directions** may also be axis names: `"X"`, `"-Z"`.
 * **Planes** may be `Plane` values or names (`"XY"`, `"YZ"`, `"ZX"`, `"XZ"`, `"YX"`, `"ZY"`).
 * **Picking faces or edges.** Arguments like `fillet`'s edges accept a selector string, a
