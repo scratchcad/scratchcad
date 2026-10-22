@@ -48,6 +48,9 @@ mod inner {
             progress: &Message_ProgressRange,
         ) -> Result<()>;
         pub fn IsDone(self: &BRepOffsetAPI_MakeOffset) -> bool;
+        /// Approximates B-spline edges by arcs and lines before offsetting, which offsets curves
+        /// that the exact algorithm turns into invalid wires.
+        pub fn SetApprox(self: Pin<&mut BRepOffsetAPI_MakeOffset>, to_approx: bool);
 
         type BRepOffsetAPI_MakeThickSolid;
         #[cxx_name = "construct_unique"]

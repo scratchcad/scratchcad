@@ -999,27 +999,56 @@ impl Shape {
     }
 
     /// Offsets a planar wire or face within its plane (positive grows it). A face keeps its
-    /// holes; an offset that splits the shape into separate regions is an error.
+    /// holes; an offset that splits the shape into separate regions is an error. An open wire
+    /// or an edge grows into the closed outline around it: a slot around a line.
     pub fn offset_2d(&self, distance: f64) -> Result<Self> {
         require_finite(distance, "offset distance")?;
-        let join = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
-        let mut make = match self.shape_type() {
-            ShapeType::Face => {
-                ffi::b_rep_offset_api::BRepOffsetAPI_MakeOffset_face_new(self.face()?, join)?
-            },
-            ShapeType::Wire => {
+        match self.shape_type() {
+            ShapeType::Face => {},
+            ShapeType::Wire if self.is_closed() => {
                 // Offsetting the face keeps the orientation consistent: positive grows outwards.
                 let face = Self::face_from(self)?;
                 let offset = face.offset_2d(distance)?;
                 return offset.wires().first();
             },
+            ShapeType::Wire => return self.outline(distance),
+            ShapeType::Edge => {
+                return Self::wire_from(std::slice::from_ref(self))?.offset_2d(distance)
+            },
             other => {
                 return Err(Error::WrongShapeType {
-                    expected: "wire or face",
+                    expected: "wire, edge or face",
                     actual: other.name(),
                 })
             },
-        };
+        }
+        // OpenCASCADE offsets B-spline edges into an invalid outline where they bend more tightly
+        // than the offset, with no error. Approximating them by arcs and lines first offsets
+        // more of those cleanly, and fails on the rest.
+        let exact = self.offset_face(distance, false);
+        match exact {
+            Ok(ref face) if face.is_valid() => return exact,
+            Err(Error::InvalidArgument(_)) => return exact,
+            _ => {},
+        }
+        match self.offset_face(distance, true) {
+            Ok(face) if face.is_valid() => Ok(face),
+            Err(error @ Error::InvalidArgument(_)) => Err(error),
+            _ => Err(invalid(format!(
+                "offset failed: an offset of {distance} of this outline comes out crossing itself, \
+                 which happens where the outline bends more tightly than the offset (inward bends \
+                 for a positive offset, outward ones for a negative). Offset by less, or make \
+                 those bends wider"
+            ))),
+        }
+    }
+
+    /// The face's offset, approximating B-spline edges by arcs and lines if `approx`.
+    fn offset_face(&self, distance: f64, approx: bool) -> Result<Self> {
+        let join = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
+        let mut make =
+            ffi::b_rep_offset_api::BRepOffsetAPI_MakeOffset_face_new(self.face()?, join)?;
+        make.pin_mut().SetApprox(approx);
         make.pin_mut().Perform(distance, 0.0)?;
         if !make.IsDone() {
             return Err(Error::OperationFailed("offset"));
@@ -1044,6 +1073,55 @@ impl Shape {
             )));
         }
         Ok(face)
+    }
+
+    /// The closed outline `distance` around an open wire: a slot around a line, or a bent slot
+    /// around a polyline or an arc.
+    fn outline(&self, distance: f64) -> Result<Self> {
+        if distance <= 0.0 {
+            return Err(invalid(format!(
+                "an open wire can only grow into the outline around it, so its offset must be \
+                 positive, got {distance}. To shrink an outline, close it first: polygon(points) \
+                 rather than polyline(points), or end a sketch with close()"
+            )));
+        }
+        let join = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
+        let mut make =
+            ffi::b_rep_offset_api::BRepOffsetAPI_MakeOffset_wire_new(self.wire()?, join)?;
+        if make.pin_mut().Perform(distance, 0.0).is_ok() && make.IsDone() {
+            let wires = Self::from_raw(make.pin_mut().Shape()?)?.wires();
+            if let [outline] = wires.shapes() {
+                if outline.is_closed() && Self::face_from(outline)?.is_valid() {
+                    return Ok(outline.clone());
+                }
+            }
+        }
+        // A straight wire lies in many planes, so OpenCASCADE can't offset it: make the slot in
+        // the horizontal one, running counter-clockwise seen from above.
+        let unplaced = || {
+            invalid(
+                "offset failed: OpenCASCADE could not offset this open wire. It must lie in one \
+                 plane, and a straight one must be horizontal, as one that isn't lies in many \
+                 planes: draw its slot as a sketch on the plane you want instead",
+            )
+        };
+        let line = match self.edges().shapes() {
+            [edge] if edge.geom_type()? == "line" => edge.clone(),
+            _ => return Err(unplaced()),
+        };
+        let (start, end) = (line.start_point()?, line.end_point()?);
+        let along = end - start;
+        if along.z.abs() > EPSILON * along.length().max(1.0) {
+            return Err(unplaced());
+        }
+        let ahead = along.normalize() * distance;
+        let left = DVec3::Z.cross(ahead);
+        Self::wire_from(&[
+            Self::line(start - left, end - left)?,
+            Self::arc(end - left, end + ahead, end + left)?,
+            Self::line(end + left, start + left)?,
+            Self::arc(start + left, start - ahead, start - left)?,
+        ])
     }
 
     /// Merges coplanar faces and collinear edges left behind by boolean operations.

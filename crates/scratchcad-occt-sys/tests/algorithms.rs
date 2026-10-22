@@ -223,6 +223,16 @@ fn planar_offsets() {
     // Four straight sides plus four quarter circles.
     assert_close(length(make.pin_mut().Shape().unwrap()), 16.0 + 2.0 * PI, 1e-6);
 
+    // Approximating changes nothing for lines and arcs.
+    let mut make = offset::BRepOffsetAPI_MakeOffset_face_new(
+        TopoDS::Face(&face).unwrap(),
+        GeomAbs_JoinType::GeomAbs_Arc,
+    )
+    .unwrap();
+    make.pin_mut().SetApprox(true);
+    make.pin_mut().Perform(1.0, 0.0).unwrap();
+    assert_close(length(make.pin_mut().Shape().unwrap()), 16.0 + 2.0 * PI, 1e-6);
+
     let mut make =
         offset::BRepOffsetAPI_MakeOffset_wire_new(&wire, GeomAbs_JoinType::GeomAbs_Intersection)
             .unwrap();

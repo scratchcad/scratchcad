@@ -331,7 +331,7 @@ fn shells_offsets_and_cleanup() {
     err_contains(dumbbell.offset_2d(-0.75), "splits the shape into separate regions");
     err_contains(Shape::face_from(&dumbbell).unwrap().offset_2d(-0.75), "separate regions");
     assert_eq!(dumbbell.offset_2d(-0.25).unwrap().shape_type(), ShapeType::Wire);
-    err_contains(cube.offset_2d(1.0), "expected wire or face, got solid");
+    err_contains(cube.offset_2d(1.0), "expected wire, edge or face, got solid");
     err_contains(square.offset_2d(f64::NAN), "offset distance");
 
     let a = Shape::cube(1.0).unwrap();
@@ -341,6 +341,52 @@ fn shells_offsets_and_cleanup() {
     let clean = fused.clean().unwrap();
     assert_eq!(clean.faces().len(), 6);
     assert_close(clean.volume().unwrap(), 2.0, 1e-9);
+}
+
+#[test]
+fn offsets_of_open_wires_and_tight_curves() {
+    // An open wire grows into the outline around it: a slot around a line, with round ends.
+    let slot = Shape::polyline(&[v(0.0, 0.0, 1.0), v(20.0, -10.0, 1.0)]).unwrap().offset_2d(5.0);
+    let slot = Shape::face_from(&slot.unwrap()).unwrap();
+    assert_close(slot.area().unwrap(), 10.0 * 500f64.sqrt() + 25.0 * PI, 1e-6);
+    assert_vec_close(slot.normal().unwrap(), DVec3::Z, 1e-9);
+    assert_close(slot.bounding_box().unwrap().max.z, 1.0, 1e-6);
+    let edge = Shape::line(DVec3::ZERO, v(10.0, 0.0, 0.0)).unwrap();
+    assert_close(
+        Shape::face_from(&edge.offset_2d(1.0).unwrap()).unwrap().area().unwrap(),
+        20.0 + PI,
+        1e-6,
+    );
+    // Around a bend, the outline follows it.
+    let bent = Shape::polyline(&[DVec3::ZERO, v(20.0, 0.0, 0.0), v(20.0, 10.0, 0.0)]).unwrap();
+    let around = Shape::face_from(&bent.offset_2d(2.0).unwrap()).unwrap();
+    assert_close(around.area().unwrap(), 120.0 + 4.0 * PI + PI - 4.0, 1e-6);
+    err_contains(bent.offset_2d(-1.0), "its offset must be positive");
+    let upright = Shape::polyline(&[DVec3::ZERO, v(0.0, 0.0, 10.0)]).unwrap();
+    err_contains(upright.offset_2d(1.0), "a straight one must be horizontal");
+
+    // A closed spline with 12 lobes, offset further than its tightest bends: OpenCASCADE's exact
+    // offset came out an invalid ring, which approximating the spline by arcs avoids, and where
+    // that fails too, the offset says so.
+    let lobes = |depth: f64| -> Shape {
+        let points: Vec<DVec3> = (0..96)
+            .map(|i| {
+                let a = i as f64 * 2.0 * PI / 96.0;
+                let r = 29.25 + depth * (12.0 * a).cos();
+                v(r * a.cos(), r * a.sin(), 0.0)
+            })
+            .collect();
+        Shape::wire_from(&[Shape::spline(&points, true).unwrap()]).unwrap()
+    };
+    let outline = lobes(1.5);
+    for distance in [3.8, -3.8] {
+        let offset = outline.offset_2d(distance).unwrap();
+        let (outer, inner) = if distance > 0.0 { (&offset, &outline) } else { (&outline, &offset) };
+        let ring = Shape::face_with_holes(outer, std::slice::from_ref(inner)).unwrap();
+        assert!(ring.is_valid(), "{distance}");
+        assert!(ring.extrude(v(0.0, 0.0, 1.5)).unwrap().is_valid(), "{distance}");
+    }
+    err_contains(lobes(3.0).offset_2d(3.8), "comes out crossing itself");
 }
 
 #[test]
