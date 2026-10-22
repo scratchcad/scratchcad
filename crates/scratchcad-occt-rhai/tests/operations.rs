@@ -183,6 +183,48 @@ fn revolutions_sweeps_and_lofts() {
 }
 
 #[test]
+fn sweeps_that_come_out_inside_out_fail() {
+    // A paper clip: a wire swept along a polyline through arcs of points that doubles back and
+    // crosses itself, with the profile a little off square. OpenCASCADE returned a solid its
+    // checker passes, of 1 mm³ where the wire holds 71, with its center of mass far outside it.
+    let arc = |cx: f64, cy: f64, r: f64, from: f64, to: f64, n: usize| -> Vec<DVec3> {
+        (0..=n)
+            .map(|i| {
+                let a = (from + (to - from) * i as f64 / n as f64).to_radians();
+                v(cx + r * a.cos(), cy + r * a.sin(), 0.0)
+            })
+            .collect()
+    };
+    let mut points = vec![v(11.55, -2.5, 0.0)];
+    points.extend(arc(28.0, 0.0, 5.0, -90.0, 90.0, 8));
+    points.extend(arc(4.0, 0.5, 4.0, 90.0, 270.0, 8));
+    points.extend(arc(25.0, -0.25, 2.25, -90.0, 90.0, 6));
+    points.push(v(9.9, 2.0, 0.0));
+    let wire = Shape::face_from(&Shape::circle(points[0], DVec3::X, 0.45).unwrap()).unwrap();
+    let error = err(wire.sweep(&Shape::polyline(&points).unwrap())).to_string();
+    assert!(error.contains("sweep failed: the result came out partly inside out"), "{error}");
+    assert!(error.contains("lies outside its bounding box"), "{error}");
+
+    // Along a spline through the same points, with the profile square to it, it sweeps right.
+    let path = Shape::wire_from(&[Shape::spline(&points, false).unwrap()]).unwrap();
+    let square = path.edges().first().unwrap().tangent_at(0.0).unwrap();
+    let profile = Shape::face_from(&Shape::circle(points[0], square, 0.45).unwrap()).unwrap();
+    let clip = profile.sweep(&path).unwrap();
+    assert_close(clip.volume().unwrap(), PI * 0.45 * 0.45 * path.length().unwrap(), 0.01);
+
+    // Around a ring of straight runs its pieces cancel out completely.
+    let ring: Vec<DVec3> = (0..=16)
+        .map(|i| {
+            let a = (i as f64 * 22.5).to_radians();
+            v(10.0 * a.cos(), 10.0 * a.sin(), 0.0)
+        })
+        .collect();
+    let profile = Shape::face_from(&Shape::circle(ring[0], ring[1] - ring[0], 1.0).unwrap());
+    let error = err(profile.unwrap().sweep(&Shape::polyline(&ring).unwrap())).to_string();
+    assert!(error.contains("of volume where its sides imply about"), "{error}");
+}
+
+#[test]
 fn fillets_and_chamfers() {
     let cube = cube10();
     let rounded = cube.fillet_all(1.0).unwrap();

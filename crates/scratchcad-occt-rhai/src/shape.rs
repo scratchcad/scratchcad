@@ -829,7 +829,48 @@ impl Shape {
         if !make.IsDone() {
             return Err(Error::OperationFailed("sweep"));
         }
-        Self::from_algorithm(make.pin_mut().Shape()?)
+        let swept = Self::from_algorithm(make.pin_mut().Shape()?)?;
+        if let Some(problem) = swept.inside_out_sweep(&profile)? {
+            return Err(invalid(format!(
+                "sweep failed: the result came out partly inside out ({problem}), although \
+                 OpenCASCADE's checker passes it. It does that along paths it can't follow: \
+                 polylines that turn many times, paths that cross themselves, or a profile that \
+                 isn't square to the path at its start. Sweep along a smooth path, \
+                 wire([spline(points)]), that doesn't cross itself, with the profile on its first \
+                 point and square to it: circle(points[0], path.edges()[0].tangent_at(0), r)"
+            )));
+        }
+        Ok(swept)
+    }
+
+    /// What shows that this sweep of the face `profile` is partly inside out, if anything.
+    /// `BRepOffsetAPI_MakePipe` returns such solids without an error, and OpenCASCADE's checker
+    /// passes them, but their pieces' volumes cancel: the center of mass lands outside the
+    /// bounding box, where no solid's can lie, or the volume comes out far below what the swept
+    /// sides imply. Those hold the profile's perimeter along the path, as the volume holds its
+    /// area, so the volume is about the sides' area times the profile's area over its perimeter.
+    fn inside_out_sweep(&self, profile: &Shape) -> Result<Option<String>> {
+        if !profile.is(ShapeType::Face) || self.solids().is_empty() {
+            return Ok(None);
+        }
+        let props = self.volume_props()?;
+        let volume = props.Mass().abs();
+        let center = from_pnt(&ffi::g_prop::GProp_GProps_CentreOfMass(&props));
+        let bounds = self.bounding_box()?;
+        let pad = DVec3::splat(1e-6 * (bounds.max - bounds.min).length());
+        let inside = BoundingBox { min: bounds.min - pad, max: bounds.max + pad }.contains(center);
+        let (area, perimeter) = (profile.surface_props()?.Mass(), profile.linear_props()?.Mass());
+        let sides = self.surface_props()?.Mass() - 2.0 * area;
+        let expected = area / perimeter * sides;
+        if inside && volume >= 0.1 * expected {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "it holds {volume:.6} of volume where its sides imply about {expected:.6}, and its \
+             center of mass, {}, lies {} its bounding box",
+            fmt_vec(center),
+            if inside { "inside" } else { "outside" }
+        )))
     }
 
     /// A shape passing through all sections (wires, or faces whose outer wire is used).
