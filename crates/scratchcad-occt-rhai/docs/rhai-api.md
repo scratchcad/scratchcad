@@ -56,7 +56,7 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 
 | category | methods |
 |----------|---------|
-| booleans | `fuse`/`union`/`+`, `cut`/`-`, `common`/`intersect`/`&`, `section` |
+| booleans | `fuse`/`union`/`+`, `cut`/`-`, `common`/`intersect`/`&`, `section`; a compound tool (`part - compound(holes)`) acts as its shapes together, even where they overlap |
 | transforms | `translate(v)`, `translate(x, y, z)`, `rotate(axis, deg)`, `rotate(origin, axis, deg)`, `rotate_x/y/z(deg)`, `scale(f)`, `scale(center, f)`, `mirror(plane_or_normal)`, `mirror(origin, normal)` |
 | features | `extrude(distance)` (along the face normal; see [Sketches](#sketches)), `extrude(vector)`, `revolve(axis, deg)`, `revolve(origin, axis, deg)`, `sweep(path)`, `fillet(r)`, `fillet(r, edges)`, `chamfer(d)`, `chamfer(d, edges)` (they leave out seam edges, where a closed surface such as a cylinder meets itself; one that fails is tried again on a `clean()` copy, without the seams booleans leave between faces in one plane), `shell(t)`, `shell(t, open_faces)`, `offset(d)` (2D; a face keeps its holes, and an open wire or edge grows into the outline around it, such as a slot around a line), `clean()`, `to_face()` |
 | exploration | `faces()`, `edges()`, `vertices()`, `wires()`, `shells()`, `solids()`, `faces(sel)`, `edges(sel)`, `vertices(sel)`, `face(sel)`, `edge(sel)`, `vertex(sel)`, `top_face()`, `bottom_face()`, `children()` |

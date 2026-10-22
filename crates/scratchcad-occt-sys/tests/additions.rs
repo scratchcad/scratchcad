@@ -105,6 +105,26 @@ fn non_destructive_booleans() {
             .unwrap();
     assert_close(volume(&all), 16.0, 1e-9);
     assert_eq!(unique_count(&all, TopAbs_ShapeEnum::TopAbs_SOLID), 2);
+
+    // A compound tool works like its children given separately, even where they overlap each
+    // other: a hole through `a` and a counterbore around its top end.
+    let builder = b_rep::BRep_Builder_new();
+    let builder = b_rep::BRep_Builder_upcast_to_topods_builder(&builder);
+    let mut holes = topo_ds::TopoDS_Compound_new();
+    builder.MakeCompound(holes.pin_mut());
+    let mut holes = topo_ds::TopoDS_Compound_as_shape(holes);
+    builder.Add(holes.pin_mut(), &make_box_at(0.5, 0.5, -1.0, 1.0, 1.0, 4.0)).unwrap();
+    builder.Add(holes.pin_mut(), &make_box_at(0.25, 0.25, 1.5, 1.5, 1.5, 1.5)).unwrap();
+    let drilled =
+        b_rep_algo_api::BRepAlgoAPI_cut(&a, &holes, &progress(), &mut String::new()).unwrap();
+    assert_close(volume(&drilled), 8.0 - 1.5 - 1.125, 1e-9);
+    let inside =
+        b_rep_algo_api::BRepAlgoAPI_common(&a, &holes, &progress(), &mut String::new()).unwrap();
+    assert_close(volume(&inside), 2.625, 1e-9);
+    let merged =
+        b_rep_algo_api::BRepAlgoAPI_fuse(&a, &holes, &progress(), &mut String::new()).unwrap();
+    assert_close(volume(&merged), 8.0 + 1.0 + 2.25, 1e-9);
+    assert_eq!(unique_count(&merged, TopAbs_ShapeEnum::TopAbs_SOLID), 1);
 }
 
 #[test]

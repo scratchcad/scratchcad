@@ -11,6 +11,19 @@
 #include <TopoDS_Iterator.hxx>
 #include <bindings_common.hxx>
 
+// Appends `tool` to `tools`, or a compound's children (and theirs) one by one. The shapes inside
+// one operand must not overlap: cutting with a compound of a hole and its counterbore as a single
+// tool leaves the counterbore uncut, without an error. Separate tools may overlap freely.
+inline void append_tools(const TopoDS_Shape &tool, TopTools_ListOfShape &tools) {
+  if (tool.ShapeType() != TopAbs_COMPOUND) {
+    tools.Append(tool);
+    return;
+  }
+  for (TopoDS_Iterator it(tool); it.More(); it.Next()) {
+    append_tools(it.Value(), tools);
+  }
+}
+
 // Runs a boolean operation in OpenCASCADE's "safe processing mode", which never modifies the
 // arguments (by default the operation may, for example, raise the tolerances of their
 // sub-shapes). The operation stops early when `range` asks it to. Returns null if it fails.
@@ -46,7 +59,10 @@ template <typename Operation>
 std::unique_ptr<TopoDS_Shape> run_boolean(const TopoDS_Shape &argument, const TopoDS_Shape &tool,
                                           const Message_ProgressRange &range, rust::String &warnings) {
   TopTools_ListOfShape tools;
-  tools.Append(tool);
+  append_tools(tool, tools);
+  if (tools.IsEmpty()) {
+    tools.Append(tool);
+  }
   return run_boolean<Operation>(argument, tools, range, warnings);
 }
 
@@ -61,9 +77,7 @@ inline std::unique_ptr<TopoDS_Shape> BRepAlgoAPI_fuse_children(const TopoDS_Shap
                                                                const Message_ProgressRange &range,
                                                                rust::String &warnings) {
   TopTools_ListOfShape list;
-  for (TopoDS_Iterator it(tools); it.More(); it.Next()) {
-    list.Append(it.Value());
-  }
+  append_tools(tools, list);
   return run_boolean<BRepAlgoAPI_Fuse>(argument, list, range, warnings);
 }
 
