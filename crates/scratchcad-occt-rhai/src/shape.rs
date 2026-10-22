@@ -690,10 +690,13 @@ impl Shape {
         // compound of the two overlapping solids, cut nothing, or find nothing in common. Where a
         // result looks like that, a point on an edge of either shape strictly inside the other
         // proves they did overlap.
+        // A cut that missed can still split faces along where the shapes meet, which moves the
+        // integrated volume by a few parts in 1e8 (a helical groove cut from a cylinder), so
+        // "removed nothing" means less than a millionth of the smaller side.
         let (sum_a, sum_b) = (a.iter().sum::<f64>(), b.iter().sum::<f64>());
         let untouched = match name {
             "fuse" => result.solids().len() == a.len() + b.len(),
-            "cut" => (got - sum_a).abs() <= 1e-9 * sum_a,
+            "cut" => (got - sum_a).abs() <= 1e-6 * sum_a.min(sum_b),
             _ => result.solids().is_empty(),
         };
         // A cut can also go the other way and remove everything, although part of the shape lies

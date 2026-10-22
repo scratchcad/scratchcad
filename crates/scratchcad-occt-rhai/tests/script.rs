@@ -767,6 +767,23 @@ fn notes_booleans_that_lose_volume() {
 }
 
 #[test]
+fn notes_cuts_that_remove_nothing() {
+    // A helical groove lofted as a square section: OpenCASCADE's cut split the cylinder's faces
+    // where the groove meets them, but removed none of its 148 mm³.
+    let script = r#"
+        let r = 13.0;
+        let s = polygon([[r - 0.8, 0, -0.3], [r + 0.5, 0, -0.3], [r + 0.5, 0, 0.3], [r - 0.8, 0, 0.3]]);
+        let a = [];
+        for i in 0..=36 { let t = i.to_float() / 12.0; a.push(s.rotate_z(t * 360.0).translate([0, 0, t * 1.5])); }
+        cylinder(r, 4.0) - loft(a, true)
+    "#;
+    scratchcad_occt_rhai::take_notes();
+    eval_shape(script).unwrap();
+    let notes = scratchcad_occt_rhai::take_notes();
+    assert!(notes[0].starts_with("line 6, position 26: the cut removed nothing"), "{notes:?}");
+}
+
+#[test]
 fn notes_cuts_that_remove_everything() {
     // A duct and its inside, lofted through three sections each: OpenCASCADE's cut of one from
     // the other came out empty.
