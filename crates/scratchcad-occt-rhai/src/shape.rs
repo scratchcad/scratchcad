@@ -1320,15 +1320,62 @@ impl Shape {
     }
 
     /// The tight axis-aligned bounding box.
+    ///
+    /// OpenCASCADE bounds edges tightly, but a curved face over the whole rectangle of
+    /// parameters its boundary spans, which can reach well past the face: a tube cut square by a
+    /// boolean keeps the box of the uncut tube. So the box starts from the edges and vertices,
+    /// and grows by a curved face only as far as the face really reaches, found as its distance
+    /// to a plane just beyond it.
     pub fn bounding_box(&self) -> Result<BoundingBox> {
-        let mut bnd = ffi::bnd::Bnd_Box_new();
-        ffi::b_rep_bnd_lib::BRepBndLib::AddOptimal(self.raw(), bnd.pin_mut(), false, false)?;
-        if bnd.IsVoid() {
-            return Err(invalid("an empty shape has no bounding box"));
+        let loose = optimal_box(self.raw())?
+            .ok_or_else(|| invalid("an empty shape has no bounding box"))?;
+        let curved: Vec<Shape> =
+            self.faces().iter().filter(|f| f.geom_type() != Ok("plane")).cloned().collect();
+        if curved.is_empty() {
+            return Ok(loose);
         }
-        let min = from_pnt(&*ffi::bnd::Bnd_Box_CornerMin(&bnd)?);
-        let max = from_pnt(&*ffi::bnd::Bnd_Box_CornerMax(&bnd)?);
-        Ok(BoundingBox { min, max })
+        let mut outline: Vec<Shape> = self.edges().shapes().to_vec();
+        outline.extend(self.vertices().iter().cloned());
+        let mut tight = optimal_box(Self::compound(&outline)?.raw())?;
+        let slack = 1e-9 + 1e-7 * loose.size().length();
+        for face in &curved {
+            let Some(reach) = optimal_box(face.raw())? else { continue };
+            let bounds = tight.get_or_insert(reach);
+            for axis in 0..3 {
+                if reach.max[axis] > bounds.max[axis] + slack {
+                    let extreme = face.extreme(axis, 1.0, &reach).unwrap_or(reach.max[axis]);
+                    bounds.max[axis] = bounds.max[axis].max(extreme.min(reach.max[axis]));
+                }
+                if reach.min[axis] < bounds.min[axis] - slack {
+                    let extreme = face.extreme(axis, -1.0, &reach).unwrap_or(reach.min[axis]);
+                    bounds.min[axis] = bounds.min[axis].min(extreme.max(reach.min[axis]));
+                }
+            }
+        }
+        Ok(tight.unwrap_or(loose))
+    }
+
+    /// How far this shape reaches along `axis` (0, 1 or 2 for X, Y or Z) in the direction of
+    /// `sign`, given a box that bounds it: its distance to a plane square to the axis just
+    /// beyond the box.
+    fn extreme(&self, axis: usize, sign: f64, bounds: &BoundingBox) -> Result<f64> {
+        let margin = 1e-3 + 0.01 * bounds.size().length();
+        let level = if sign > 0.0 { bounds.max[axis] } else { bounds.min[axis] } + sign * margin;
+        let (u, w) = ((axis + 1) % 3, (axis + 2) % 3);
+        let corner = |a: f64, b: f64| {
+            let mut p = DVec3::ZERO;
+            p[axis] = level;
+            p[u] = if a > 0.0 { bounds.max[u] + margin } else { bounds.min[u] - margin };
+            p[w] = if b > 0.0 { bounds.max[w] + margin } else { bounds.min[w] - margin };
+            p
+        };
+        let plane = Self::face_from(&Self::polygon(&[
+            corner(-1.0, -1.0),
+            corner(1.0, -1.0),
+            corner(1.0, 1.0),
+            corner(-1.0, 1.0),
+        ])?)?;
+        Ok(level - sign * self.distance(&plane)?)
     }
 
     /// Whether OpenCASCADE's checker considers the shape topologically and geometrically valid.
@@ -1644,6 +1691,18 @@ pub struct MassProperties {
     /// geometry could not be split into Bézier patches: then they come from integrating it
     /// directly, which can be off by a percent or so on lofts, sweeps and extruded splines.
     pub exact: bool,
+}
+
+/// OpenCASCADE's optimal bounding box of a shape, or `None` for an empty one.
+fn optimal_box(shape: &Raw) -> Result<Option<BoundingBox>> {
+    let mut bnd = ffi::bnd::Bnd_Box_new();
+    ffi::b_rep_bnd_lib::BRepBndLib::AddOptimal(shape, bnd.pin_mut(), false, false)?;
+    if bnd.IsVoid() {
+        return Ok(None);
+    }
+    let min = from_pnt(&*ffi::bnd::Bnd_Box_CornerMin(&bnd)?);
+    let max = from_pnt(&*ffi::bnd::Bnd_Box_CornerMax(&bnd)?);
+    Ok(Some(BoundingBox { min, max }))
 }
 
 /// An axis-aligned bounding box.
