@@ -147,7 +147,8 @@ others, such as servers:
 * **Meshing.** `shape.mesh_with(&MeshOptions::new(tolerance).angular_tolerance(10.0))` also sets
   relative tolerances and parallel meshing. Meshing never modifies the shape (it works on a copy),
   `mesh.face_triangles` tells which triangles belong to which face, and `mesh.welded()` merges the
-  vertices faces share, making the mesh of a solid watertight.
+  vertices faces share, making the mesh of a solid watertight. When OpenCASCADE can't mesh a face,
+  which it can't where two surfaces coincide, the error names the face's type and where it lies.
 * **Measuring.** `volume()`, `area()` and `center()` are exact for analytic geometry (lines,
   conics, planes, cylinders, cones, spheres, tori). A shape with B-spline curves or surfaces
   (lofts, sweeps, splines) is measured on a copy split into Bézier patches, to about 1e-7 of
