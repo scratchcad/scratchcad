@@ -25,10 +25,11 @@ A script produces its shape in one of two ways:
 A selection, a sketch or an array of shapes also works; they become one compound.
 
 Conventions:
-- Numbers may be integers or floats, and angles are in degrees.
+- Numbers may be integers or floats, and angles are in degrees. Maths: x ** y, sqrt(x), x.abs(), min(a, b), max(a, b), x.sin() and the other trig functions in radians, PI(); there is no pow() or clamp().
 - Vectors are [x, y, z] arrays (or [x, y] with z = 0) or vec3(x, y, z). Directions may also be axis names: "X", "-Z".
 - Planes are "XY", "YZ", "XZ" (and the reversed "YX", "ZY", "ZX"), or plane(origin, normal), or face.plane() for a planar face.
 - Shapes never change: every operation returns a new shape, so chain calls and reassign: \`part = part.fillet(1, "|Z");\`.
+- Rhai reserves some words that make natural names, and rejects them as variable names: module, thread, case, match, default, new, use, with, static, shared, sync, spawn, go, goto, var, void, null, nil, package, super, is, import, export, private, protected, public, async, await, yield, as, fn, this, try, catch, throw, loop, switch, do, until. Use gear_module, threads, housing and so on.
 
 Solids:
 - box(dx, dy, dz) has a corner at the origin; box_centered(dx, dy, dz) is centered on it; box_from_corners(a, b); cube(s)
@@ -51,6 +52,8 @@ Operations (methods on shapes):
 - Measuring: volume(), area(), length(), center(), bounding_box(), distance(other), closest_points(other), contains(point), classify(point) ("inside", "outside" or "on"), is_valid(), shape_type(), radius() and geom_type() of an edge or face, normal() of a face.
 
 Selectors pick faces or edges by a CadQuery-style string, wherever a method takes edges or faces: ">Z" farthest along +Z (the top), "<Z" nearest (the bottom), ">Z[1]" the next level down, "|Z" parallel to Z (vertical edges, or faces whose normal is along Z), "#Z" perpendicular, "+Z"/"-Z" facing that way, "%CIRCLE" or "%PLANE" by geometry type. Combine them with and, or, not, exc and parentheses: box(10, 10, 5).fillet(1, "|Z and >X"). Selections also have len(), indexing, first(), filter(|f| ...), sort_by(|f| ...), top(), bottom() and friends, and can be passed instead of a selector.
+
+A helix (for a spring or a coil) is a spline through points on it: sweep a profile placed square to the helix at its start along spline(points), with 12 or more points per turn. Threads are better lofted than swept: loft(sections, true) through 16 or more copies of the thread's cross-section per turn, each turned about the axis and raised by the pitch over that count, with the ridge's root sunk a little into the core so the two fuse cleanly.
 
 Errors are catchable: try { ... } catch (err) { print(err) }. Fillets and chamfers fail when the radius is too large for the faces around an edge; do them last, on the finished body, with radii smaller than the walls they touch. Booleans need the tool to overlap the part: make cutting tools a little longer than the part is thick, rather than flush with its faces. Prefer one fuse_all(array) over many + in a loop, and cut many holes at once with part - compound(holes), where the holes may overlap, like a bore and its counterbore.
 
