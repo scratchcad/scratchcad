@@ -702,8 +702,8 @@ impl Shape {
     /// or nearly coincide (a lofted thread ridge running out past the end of its core lost the
     /// core's volume to it). The volumes come first from integrating the solids directly, which is
     /// fast and usually within a percent or so, but can be far off on long B-spline lofts (30% on
-    /// a 42-turn thread groove). A volume that looks impossible is measured again exactly, on
-    /// copies, as measuring splits faces in place, and noted only if it still is.
+    /// a 42-turn thread groove). A volume that looks impossible is measured again exactly, and
+    /// noted only if it still is.
     fn volume_problem(&self, other: &Shape, name: &str, result: &Raw) -> Result<Option<String>> {
         let volumes = |shape: &Shape| -> Result<Vec<f64>> {
             shape.solids().iter().map(|s| Ok(s.volume_props()?.Mass().abs())).collect()
@@ -763,7 +763,7 @@ impl Shape {
     }
 
     /// [`impossible_volume`] of a boolean `name` of this shape and `other` that gave `result`,
-    /// measured exactly on copies of the three.
+    /// measured exactly.
     fn exact_volume_problem(
         &self,
         other: &Shape,
@@ -771,9 +771,9 @@ impl Shape {
         result: &Shape,
     ) -> Result<Option<String>> {
         let exact = |shape: &Shape| -> Result<Vec<f64>> {
-            shape.solids().iter().map(|s| s.deep_copy()?.volume()).collect()
+            shape.solids().iter().map(Shape::volume).collect()
         };
-        let got = result.deep_copy()?.volume()?;
+        let got = result.volume()?;
         Ok(impossible_volume(name, got, &exact(self)?, &exact(other)?))
     }
 

@@ -223,8 +223,8 @@ fn unmeshable(face: &Shape, count: usize) -> Error {
         n => format!(" (and {} more faces)", n - 1),
     };
     invalid(format!(
-        "OpenCASCADE could not mesh the {kind} face{place}{others}. That happens where the face \
-         lies on another or meets it along a line, such as a cylinder with the same radius as the \
+        "OpenCASCADE could not mesh the {kind} face{place}{others}. That usually happens where \
+         the face lies on another or meets it along a line, such as a cylinder with the same radius as the \
          crest of a thread that touches it, even when OpenCASCADE's checker passes the shape: \
          make one of them a little larger or smaller, by a few hundredths of a millimetre"
     ))
