@@ -660,8 +660,9 @@ fn errors_carry_their_kind() {
     let message = run::<String>("let m = \"\"; try { box(0, 1, 1); } catch (e) { m = e; } m");
     assert!(message.contains("box x size must be positive"), "{message}");
 
+    // Like a failed shell, a failed fillet says what to change, as an invalid argument.
     let error = engine().eval::<Dynamic>("box(1, 1, 1).fillet(50)").unwrap_err();
-    assert!(matches!(error_kind(&error), Some(ErrorKind::Occt | ErrorKind::OperationFailed)));
+    assert_eq!(error_kind(&error), Some(ErrorKind::InvalidArgument));
     let error = engine().eval::<Dynamic>("box(1, 1, 0)").unwrap_err();
     assert_eq!(error_kind(&error), Some(ErrorKind::InvalidArgument));
     let error = engine().eval::<Dynamic>("no_such_function()").unwrap_err();

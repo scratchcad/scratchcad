@@ -35,6 +35,8 @@ mod inner {
             first: &mut f64,
             last: &mut f64,
         ) -> Result<UniquePtr<Handle_Geom_Curve>>;
+        /// Whether the edge is a seam of the face, bounding it on both sides.
+        pub fn BRep_Tool_IsClosed_on_face(edge: &TopoDS_Edge, face: &TopoDS_Face) -> bool;
         pub fn BRep_Tool_Pnt(vertex: &TopoDS_Vertex) -> Result<UniquePtr<gp_Pnt>>;
         pub fn BRep_Tool_Triangulation(
             face: &TopoDS_Face,

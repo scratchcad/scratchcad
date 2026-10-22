@@ -458,6 +458,69 @@ fn fillets_and_chamfers_that_break_the_solid_fail() {
 }
 
 #[test]
+fn fillets_skip_the_seams_booleans_leave() {
+    // A hub with two lobes on bridges, fused flush: the top stays split into coplanar faces,
+    // and selecting the top edges picks up the seams between them, which OpenCASCADE can't
+    // round here.
+    let lobe = Shape::cylinder_at(v(30.0, 0.0, 0.0), DVec3::Z, 14.5, 7.0)
+        .unwrap()
+        .fuse(&Shape::box_from_corners(v(0.0, -6.0, 0.0), v(30.0, 6.0, 7.0)).unwrap())
+        .unwrap();
+    let part = Shape::cylinder(15.0, 7.0)
+        .unwrap()
+        .fuse(&lobe)
+        .unwrap()
+        .fuse(&lobe.rotate(DVec3::ZERO, DVec3::Z, 180.0).unwrap())
+        .unwrap();
+    let top = part.edges().farthest(DVec3::Z).unwrap();
+    assert!(top.len() > part.clean().unwrap().edges().farthest(DVec3::Z).unwrap().len());
+    let volume = part.volume().unwrap();
+    let rounded = part.fillet(1.5, top.shapes()).unwrap();
+    assert!(rounded.is_valid());
+    assert!(rounded.volume().unwrap() < volume);
+    let bevelled = part.chamfer(0.5, top.shapes()).unwrap();
+    assert!(bevelled.is_valid());
+    assert!(bevelled.volume().unwrap() < volume);
+
+    // Seams alone leave nothing to round, and a radius too big for the faces fails either way;
+    // both say what to try instead.
+    let outline = Shape::compound(part.clean().unwrap().edges().shapes()).unwrap();
+    let seams: Vec<Shape> = top
+        .iter()
+        .filter(|e| {
+            let mid = Shape::vertex_at(e.point_at(0.5).unwrap()).unwrap();
+            mid.distance(&outline).unwrap() > 1e-4
+        })
+        .cloned()
+        .collect();
+    assert!(!seams.is_empty());
+    err_contains(part.fillet(1.0, &seams), "could not round the");
+    err_contains(part.chamfer(30.0, top.shapes()), "Try a smaller distance");
+    err_contains(cube10().fillet(20.0, &[cube10().edges().first().unwrap()]), "the selected edge");
+}
+
+#[test]
+fn fillets_leave_out_seams() {
+    // A bridge saddle: a box under a large horizontal cylinder, whose seam runs along the top.
+    let saddle = Shape::box_centered(72.0, 3.2, 11.0)
+        .unwrap()
+        .translate(v(0.0, 0.0, 5.5))
+        .unwrap()
+        .common(&Shape::cylinder_at(v(0.0, -5.0, -389.0), DVec3::Y, 400.0, 10.0).unwrap())
+        .unwrap();
+    let along_y = saddle.edges().parallel_to(DVec3::Y).unwrap();
+    let seam = along_y.farthest(DVec3::Z).unwrap();
+    assert_eq!(seam.len(), 1);
+    let m = err(saddle.fillet(1.0, seam.shapes())).to_string();
+    assert!(m.contains("all seams") && m.contains("Select the edges between faces"), "{m}");
+    assert!(err(saddle.chamfer(0.5, seam.shapes())).to_string().contains("to bevel"));
+    // With the seam among them, the real edges are still rounded.
+    let rounded = saddle.fillet(1.0, along_y.shapes()).unwrap();
+    assert!(rounded.is_valid());
+    assert!(rounded.volume().unwrap() < saddle.volume().unwrap());
+}
+
+#[test]
 fn shells_offsets_and_cleanup() {
     let cube = cube10();
     let top = cube.faces().farthest(DVec3::Z).unwrap();

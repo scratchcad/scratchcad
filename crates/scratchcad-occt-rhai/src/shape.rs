@@ -1172,17 +1172,117 @@ impl Shape {
     pub fn fillet(&self, radius: f64, edges: &[Shape]) -> Result<Self> {
         require_positive(radius, "fillet radius")?;
         self.require_edges(edges, "fillet")?;
-        crate::cancel::check()?;
-        let mut make = ffi::b_rep_fillet_api::BRepFilletAPI_MakeFillet_new(self.raw())?;
+        self.blend(Blend::Fillet, radius, edges, |shape, edges| {
+            crate::cancel::check()?;
+            let mut make = ffi::b_rep_fillet_api::BRepFilletAPI_MakeFillet_new(shape.raw())?;
+            for edge in edges {
+                make.pin_mut().add_edge(radius, edge.edge()?)?;
+            }
+            make.pin_mut().Build(&progress()).map_err(|e| occt_error("fillet", e))?;
+            if !make.IsDone() {
+                return Err(failed("fillet"));
+            }
+            Self::from_algorithm(make.pin_mut().Shape()?)
+        })
+    }
+
+    /// Runs a fillet or chamfer, retrying it once on a cleaned copy.
+    ///
+    /// A boolean leaves the faces it glues together split along seams that are no real corner,
+    /// such as where a fused boss's top meets the plate's top in one plane. Selectors like `">Z"`
+    /// pick those seams up with the real edges, and OpenCASCADE cannot round an edge between two
+    /// faces that continue each other, so the whole fillet fails. When the first try fails and
+    /// [`clean`](Self::clean) removes edges, each selected edge is found again on the cleaned
+    /// shape by its midpoint: the seams have none to land on and drop out.
+    fn blend(
+        &self,
+        kind: Blend,
+        size: f64,
+        edges: &[Shape],
+        build: impl Fn(&Shape, &[Shape]) -> Result<Shape>,
+    ) -> Result<Self> {
+        // A seam, where a closed surface such as a cylinder meets itself, is no corner, and
+        // OpenCASCADE fails the whole operation on one. Selectors pick them up: the seam of a
+        // horizontal cylinder can be the highest edge.
+        let faces = self.faces();
+        let mut corners = Vec::with_capacity(edges.len());
         for edge in edges {
-            make.pin_mut().add_edge(radius, edge.edge()?)?;
+            let mut seam = false;
+            for face in faces.iter() {
+                seam |= ffi::b_rep::BRep_Tool_IsClosed_on_face(edge.edge()?, face.face()?);
+            }
+            if !seam {
+                corners.push(edge.clone());
+            }
         }
-        make.pin_mut().Build(&progress()).map_err(|e| occt_error("fillet", e))?;
-        if !make.IsDone() {
-            return Err(failed("fillet"));
+        if corners.is_empty() {
+            let (what, verb) = kind.words();
+            return Err(Error::EmptySelection(format!(
+                "{what} needs at least one edge where two faces meet, but the selected edges are \
+                 all seams, where a closed surface such as a cylinder meets itself: there is no \
+                 corner there to {verb}. Select the edges between faces instead"
+            )));
         }
-        let rounded = Self::from_algorithm(make.pin_mut().Shape()?)?;
-        checked_blend(self, rounded, "fillet", radius, edges.len())
+        let edges = &corners[..];
+        // OpenCASCADE can also report success and return a broken solid, for instance for a
+        // chamfer wider than a rounded corner beside it; booleans, meshes and exports of it then
+        // fail, or come out empty, far from the line that broke it. Such a result counts as a
+        // failure, unless the shape was broken already.
+        let checked = |shape: &Shape, edges: &[Shape]| -> Result<Shape> {
+            let blended = build(shape, edges)?;
+            if blended.is_valid() || !shape.is_valid() {
+                Ok(blended)
+            } else {
+                Err(blend_invalid(kind, size, edges.len()))
+            }
+        };
+        let error = match checked(self, edges) {
+            Ok(shape) => return Ok(shape),
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
+            Err(error) => error,
+        };
+        let retried = self.clean().and_then(|cleaned| {
+            if cleaned.edges().len() >= self.edges().len() {
+                return Err(error.clone());
+            }
+            let found = cleaned.edges_through(edges)?;
+            if found.is_empty() {
+                return Err(error.clone());
+            }
+            checked(&cleaned, &found)
+        });
+        match retried {
+            Ok(shape) => Ok(shape),
+            Err(Error::Cancelled) => Err(Error::Cancelled),
+            Err(_) if error == blend_invalid(kind, size, edges.len()) => Err(error),
+            Err(_) => Err(blend_failed(kind, size, edges.len())),
+        }
+    }
+
+    /// The edges of this shape that pass through the midpoints of `edges`, without repeats.
+    fn edges_through(&self, edges: &[Shape]) -> Result<Vec<Shape>> {
+        let mut candidates = Vec::new();
+        for edge in self.edges().shapes() {
+            if let Ok(bounds) = edge.bounding_box() {
+                candidates.push((edge.clone(), bounds));
+            }
+        }
+        let mut found: Vec<Shape> = Vec::new();
+        for edge in edges {
+            let mid = edge.point_at(0.5)?;
+            let probe = Shape::vertex_at(mid)?;
+            let pad = DVec3::splat(1e-4);
+            for (candidate, bounds) in &candidates {
+                let near = BoundingBox { min: bounds.min - pad, max: bounds.max + pad };
+                if near.contains(mid)
+                    && probe.distance(candidate)? < 1e-5
+                    && !found.iter().any(|f| f.is_same(candidate))
+                {
+                    found.push(candidate.clone());
+                }
+            }
+        }
+        Ok(found)
     }
 
     /// Rounds every edge.
@@ -1194,17 +1294,18 @@ impl Shape {
     pub fn chamfer(&self, distance: f64, edges: &[Shape]) -> Result<Self> {
         require_positive(distance, "chamfer distance")?;
         self.require_edges(edges, "chamfer")?;
-        crate::cancel::check()?;
-        let mut make = ffi::b_rep_fillet_api::BRepFilletAPI_MakeChamfer_new(self.raw())?;
-        for edge in edges {
-            make.pin_mut().add_edge(distance, edge.edge()?)?;
-        }
-        make.pin_mut().Build(&progress()).map_err(|e| occt_error("chamfer", e))?;
-        if !make.IsDone() {
-            return Err(failed("chamfer"));
-        }
-        let bevelled = Self::from_algorithm(make.pin_mut().Shape()?)?;
-        checked_blend(self, bevelled, "chamfer", distance, edges.len())
+        self.blend(Blend::Chamfer, distance, edges, |shape, edges| {
+            crate::cancel::check()?;
+            let mut make = ffi::b_rep_fillet_api::BRepFilletAPI_MakeChamfer_new(shape.raw())?;
+            for edge in edges {
+                make.pin_mut().add_edge(distance, edge.edge()?)?;
+            }
+            make.pin_mut().Build(&progress()).map_err(|e| occt_error("chamfer", e))?;
+            if !make.IsDone() {
+                return Err(failed("chamfer"));
+            }
+            Self::from_algorithm(make.pin_mut().Shape()?)
+        })
     }
 
     /// Bevels every edge.
@@ -1936,41 +2037,69 @@ fn invalid_boolean(name: &str, warnings: &str) -> String {
     )
 }
 
+#[derive(Clone, Copy)]
+enum Blend {
+    Fillet,
+    Chamfer,
+}
+
+impl Blend {
+    /// The operation's name and what it does to an edge.
+    fn words(self) -> (&'static str, &'static str) {
+        match self {
+            Blend::Fillet => ("fillet", "round"),
+            Blend::Chamfer => ("chamfer", "bevel"),
+        }
+    }
+}
+
+impl Blend {
+    /// What the size of the fillet or chamfer is called.
+    fn measure(self) -> &'static str {
+        match self {
+            Blend::Fillet => "radius",
+            Blend::Chamfer => "distance",
+        }
+    }
+}
+
+/// "the selected edge" or "the 3 selected edges".
+fn selected(edges: usize) -> String {
+    if edges == 1 {
+        "the selected edge".to_string()
+    } else {
+        format!("the {edges} selected edges")
+    }
+}
+
+/// Why a fillet or chamfer that gave an invalid solid failed, and what to try instead.
+fn blend_invalid(kind: Blend, size: f64, edges: usize) -> Error {
+    let ((what, verb), measure, count) = (kind.words(), kind.measure(), selected(edges));
+    invalid(format!(
+        "{what} failed: a {what} of {count} with {measure} {size} gave an invalid solid, which \
+         OpenCASCADE's checker rejects. Usually the {measure} is too large for a face next to one \
+         of the edges, such as a chamfer wider than a rounded corner beside it. Try a smaller \
+         {measure}, or {verb} fewer edges at a time"
+    ))
+}
+
+/// Why a fillet or chamfer failed, and what to try instead.
+fn blend_failed(kind: Blend, size: f64, edges: usize) -> Error {
+    let ((what, verb), measure, count) = (kind.words(), kind.measure(), selected(edges));
+    invalid(format!(
+        "{what} failed: OpenCASCADE could not {verb} {count} with {measure} {size}. Usually the \
+         {measure} is too large for a face next to one of the edges, or an edge ends in a corner \
+         the {what} can't close. Try a smaller {measure}, or {verb} fewer edges at a time (for \
+         example the vertical edges first, then the top ones)"
+    ))
+}
+
 /// An exception from `operation`, or [`Error::Cancelled`] when it was asked to stop.
 fn occt_error(operation: &str, exception: cxx::Exception) -> Error {
     match Error::from(exception) {
         Error::Occt(message) => Error::Occt(format!("{operation}: {message}")),
         other => other,
     }
-}
-
-/// The `result` of a fillet or chamfer (`what`) of `size` on `edges` edges of `input`, unless it
-/// is invalid where the input was not. OpenCASCADE can report success and return a broken solid,
-/// for instance for a chamfer wider than a rounded corner beside it; booleans, meshes and exports
-/// of that solid then fail, or come out empty, far from the line that broke it.
-fn checked_blend(
-    input: &Shape,
-    result: Shape,
-    what: &str,
-    size: f64,
-    edges: usize,
-) -> Result<Shape> {
-    if result.is_valid() || !input.is_valid() {
-        return Ok(result);
-    }
-    let (verb, measure) =
-        if what == "fillet" { ("round", "radius") } else { ("bevel", "distance") };
-    let count = if edges == 1 {
-        "the selected edge".to_string()
-    } else {
-        format!("the {edges} selected edges")
-    };
-    Err(invalid(format!(
-        "{what} failed: a {what} of {count} with {measure} {size} gave an invalid solid, which \
-         OpenCASCADE's checker rejects. Usually the {measure} is too large for a face next to one \
-         of the edges, such as a chamfer wider than a rounded corner beside it. Try a smaller \
-         {measure}, or {verb} fewer edges at a time"
-    )))
 }
 
 impl PartialEq for Shape {
