@@ -66,9 +66,9 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 A fillet or chamfer whose result OpenCASCADE's checker rejects fails at its own line, suggesting
 a smaller size or fewer edges, rather than returning an invalid solid.
 A sweep that comes out partly inside out fails as well: OpenCASCADE returns such solids, which its
-checker passes, along polylines that turn many times, paths that cross themselves, or with a
-profile that isn't square to the path. Sweep along a smooth path (`wire([spline(points)])`) with
-the profile on its first point, square to it.
+checker passes, along paths that cross themselves, or with a profile that isn't square to the
+path. Sweep along a smooth path (`wire([spline(points)])`) with the profile on its first point,
+square to it.
 
 ## Selections and selectors
 

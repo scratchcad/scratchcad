@@ -327,16 +327,73 @@ fn sweeps_that_come_out_inside_out_fail() {
     let clip = profile.sweep(&path).unwrap();
     assert_close(clip.volume().unwrap(), PI * 0.45 * 0.45 * path.length().unwrap(), 0.01);
 
-    // Around a ring of straight runs its pieces cancel out completely.
+    assert!(error.contains("of volume where its sides imply about"), "{error}");
+
+    // Around a ring of straight runs, BRepOffsetAPI_MakePipe's pieces cancelled out completely;
+    // the pipe shell mitres the corners and sweeps it right.
     let ring: Vec<DVec3> = (0..=16)
         .map(|i| {
             let a = (i as f64 * 22.5).to_radians();
             v(10.0 * a.cos(), 10.0 * a.sin(), 0.0)
         })
         .collect();
+    let path = Shape::polyline(&ring).unwrap();
     let profile = Shape::face_from(&Shape::circle(ring[0], ring[1] - ring[0], 1.0).unwrap());
-    let error = err(profile.unwrap().sweep(&Shape::polyline(&ring).unwrap())).to_string();
-    assert!(error.contains("of volume where its sides imply about"), "{error}");
+    let swept = profile.unwrap().sweep(&path).unwrap();
+    assert_close(swept.volume().unwrap(), PI * path.length().unwrap(), 1e-3 * PI * 62.4);
+}
+
+#[test]
+fn sweeps_follow_helices_corners_and_holes() {
+    // A closed-end spring: one turn at 1.5 mm pitch, eight at 3.5, one at 1.5. Its pitch changes,
+    // which crashed the process with BRepOffsetAPI_MakePipe.
+    let mut z = 0.0;
+    let points: Vec<DVec3> = (0..=240)
+        .map(|i| {
+            let t = i as f64 / 24.0;
+            let a = t * 2.0 * PI;
+            let p = v(4.5 * a.cos(), 4.5 * a.sin(), z);
+            z += if !(1.0..9.0).contains(&t) { 1.5 } else { 3.5 } / 24.0;
+            p
+        })
+        .collect();
+    let path = Shape::spline(&points, false).unwrap();
+    let wire = Shape::face_from(&Shape::circle(v(4.5, 0.0, 0.0), DVec3::Y, 0.5).unwrap()).unwrap();
+    let spring = wire.sweep(&path).unwrap();
+    assert!(spring.is_valid());
+    assert_close(spring.volume().unwrap(), PI * 0.25 * path.length().unwrap(), 0.01 * 223.0);
+
+    // A tube: the hole in the profile sweeps too.
+    let ring = Shape::face_with_holes(
+        &Shape::circle(DVec3::ZERO, DVec3::Z, 2.0).unwrap(),
+        &[Shape::circle(DVec3::ZERO, DVec3::Z, 1.0).unwrap()],
+    )
+    .unwrap();
+    let tube = ring.sweep(&Shape::line(DVec3::ZERO, v(0.0, 0.0, 10.0)).unwrap()).unwrap();
+    assert_close(tube.volume().unwrap(), PI * 3.0 * 10.0, 1e-6);
+
+    // An open profile sweeps into a sheet, and a path may turn a corner.
+    let corner = Shape::polyline(&[DVec3::ZERO, v(0.0, 0.0, 10.0), v(10.0, 0.0, 10.0)]).unwrap();
+    let square = Shape::rect_on(&Plane::named("XY").unwrap(), 2.0, 2.0).unwrap();
+    let bent = square.sweep(&corner).unwrap();
+    assert!(bent.is_valid());
+    assert_close(bent.volume().unwrap(), 4.0 * 20.0, 1e-6);
+    let sheet = Shape::line(v(-1.0, 0.0, 0.0), v(1.0, 0.0, 0.0)).unwrap().sweep(&corner).unwrap();
+    assert!(sheet.solids().is_empty() && !sheet.faces().is_empty());
+    // A picture hook: a line turning a corner into an arc, which only BRepOffsetAPI_MakePipe
+    // sweeps.
+    let hook = Shape::wire_from(&[
+        Shape::line(v(0.0, 0.6, 2.0), v(0.0, 6.0, -2.4)).unwrap(),
+        Shape::arc(v(0.0, 6.0, -2.4), v(0.0, 12.0, -8.4), v(0.0, 15.6, -1.2)).unwrap(),
+    ])
+    .unwrap();
+    let wire = Shape::circle(v(0.0, 0.6, 2.0), v(0.0, 5.4, -4.4), 1.5).unwrap();
+    let hooked = Shape::face_from(&wire).unwrap().sweep(&hook).unwrap();
+    assert!(hooked.is_valid());
+    assert_close(hooked.volume().unwrap(), 113.0, 1.0);
+    // A point sweeps into a copy of the path.
+    let traced = Shape::vertex_at(DVec3::ZERO).unwrap().sweep(&corner).unwrap();
+    assert_close(traced.length().unwrap(), 20.0, 1e-9);
 }
 
 #[test]
