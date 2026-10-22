@@ -63,6 +63,9 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 | edges, faces, vertices | `point()`, `start_point()`, `end_point()`, `point_at(t)`, `tangent_at(t)`, `radius()`, `geom_type()`, `normal()`, `plane()` (a sketch plane on a planar face), `outer_wire()` |
 | meshing | `mesh(tolerance)`, `mesh(tolerance, angle)` (angle in degrees, default 28.6); a `Mesh` has `vertices`, `normals`, `indices`, `vertex_count`, `triangle_count`, `area()` and `welded()` (shared vertices merged) |
 
+A fillet or chamfer whose result OpenCASCADE's checker rejects fails at its own line, suggesting
+a smaller size or fewer edges, rather than returning an invalid solid.
+
 ## Selections and selectors
 
 `faces()`, `edges()` and friends return a `Selection`: an ordered list of shapes that supports

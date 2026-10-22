@@ -879,7 +879,8 @@ impl Shape {
         if !make.IsDone() {
             return Err(failed("fillet"));
         }
-        Self::from_algorithm(make.pin_mut().Shape()?)
+        let rounded = Self::from_algorithm(make.pin_mut().Shape()?)?;
+        checked_blend(self, rounded, "fillet", radius, edges.len())
     }
 
     /// Rounds every edge.
@@ -900,7 +901,8 @@ impl Shape {
         if !make.IsDone() {
             return Err(failed("chamfer"));
         }
-        Self::from_algorithm(make.pin_mut().Shape()?)
+        let bevelled = Self::from_algorithm(make.pin_mut().Shape()?)?;
+        checked_blend(self, bevelled, "chamfer", distance, edges.len())
     }
 
     /// Bevels every edge.
@@ -1439,6 +1441,35 @@ fn occt_error(operation: &str, exception: cxx::Exception) -> Error {
         Error::Occt(message) => Error::Occt(format!("{operation}: {message}")),
         other => other,
     }
+}
+
+/// The `result` of a fillet or chamfer (`what`) of `size` on `edges` edges of `input`, unless it
+/// is invalid where the input was not. OpenCASCADE can report success and return a broken solid,
+/// for instance for a chamfer wider than a rounded corner beside it; booleans, meshes and exports
+/// of that solid then fail, or come out empty, far from the line that broke it.
+fn checked_blend(
+    input: &Shape,
+    result: Shape,
+    what: &str,
+    size: f64,
+    edges: usize,
+) -> Result<Shape> {
+    if result.is_valid() || !input.is_valid() {
+        return Ok(result);
+    }
+    let (verb, measure) =
+        if what == "fillet" { ("round", "radius") } else { ("bevel", "distance") };
+    let count = if edges == 1 {
+        "the selected edge".to_string()
+    } else {
+        format!("the {edges} selected edges")
+    };
+    Err(invalid(format!(
+        "{what} failed: a {what} of {count} with {measure} {size} gave an invalid solid, which \
+         OpenCASCADE's checker rejects. Usually the {measure} is too large for a face next to one \
+         of the edges, such as a chamfer wider than a rounded corner beside it. Try a smaller \
+         {measure}, or {verb} fewer edges at a time"
+    )))
 }
 
 impl PartialEq for Shape {

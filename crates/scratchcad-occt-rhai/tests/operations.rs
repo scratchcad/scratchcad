@@ -207,6 +207,30 @@ fn fillets_and_chamfers() {
 }
 
 #[test]
+fn fillets_and_chamfers_that_break_the_solid_fail() {
+    // A chamfer wider than the rounded corners beside its edges: OpenCASCADE reports success and
+    // returns an invalid solid.
+    let plate = Shape::make_box(20.0, 20.0, 6.0).unwrap();
+    let rounded = plate.fillet(3.0, plate.edges().select("|Z").unwrap().shapes()).unwrap();
+    let top = rounded.edges().select(">Z").unwrap();
+    assert!(rounded.chamfer(2.9, top.shapes()).unwrap().is_valid());
+    err_contains(
+        rounded.chamfer(3.5, top.shapes()),
+        "chamfer failed: a chamfer of the 8 selected edges with distance 3.5 gave an invalid solid",
+    );
+    // A pyramid lofted onto a plate, its vertical edges chamfered.
+    let cap = scratchcad_occt_rhai::eval_shape(
+        r#"box_centered(100, 100, 4).translate([0, 0, 2])
+            + loft([rect(plane([0, 0, 3.9], "Z"), 100, 100), rect(plane([0, 0, 30], "Z"), 4, 4)], true)"#,
+    )
+    .unwrap();
+    assert!(cap.is_valid());
+    let error = err(cap.chamfer(1.0, cap.edges().select("|Z").unwrap().shapes())).to_string();
+    assert!(error.contains("gave an invalid solid"), "{error}");
+    assert!(error.contains("Try a smaller distance, or bevel fewer edges at a time"), "{error}");
+}
+
+#[test]
 fn shells_offsets_and_cleanup() {
     let cube = cube10();
     let top = cube.faces().farthest(DVec3::Z).unwrap();
