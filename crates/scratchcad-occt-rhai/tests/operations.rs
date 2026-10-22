@@ -477,6 +477,39 @@ fn shells_offsets_and_cleanup() {
     err_contains(cube.shell(f64::NAN, &[]), "shell thickness");
     err_contains(cube.shell(1.0, &[cube.edges().first().unwrap()]), "expected face, got edge");
 
+    // A box with rounded corners and a 1.5 mm fillet round its base, shelled 2.5 mm through the
+    // top (a diecast enclosure): this failed with OpenCASCADE's default settings.
+    let enclosure = Shape::box_centered(112.4, 60.5, 31.0).unwrap();
+    let vertical = enclosure.edges().select("|Z").unwrap();
+    let enclosure = enclosure.fillet(6.0, vertical.shapes()).unwrap();
+    let base = enclosure.edges().select("<Z").unwrap();
+    let enclosure = enclosure.fillet(1.5, base.shapes()).unwrap();
+    let open = enclosure.faces().farthest(DVec3::Z).unwrap();
+    let walls = enclosure.shell(-2.5, open.shapes()).unwrap();
+    assert!(walls.is_valid());
+    assert!(walls.volume().unwrap() < 0.5 * enclosure.volume().unwrap());
+    // Walls thicker than the fillets they offset inward can't be made; OpenCASCADE returned
+    // the box unchanged, or an invalid shape, as if it had worked.
+    let rounded = Shape::box_centered(50.0, 30.0, 20.0).unwrap().fillet_all(1.0).unwrap();
+    let open = rounded.faces().farthest(DVec3::Z).unwrap();
+    err_contains(rounded.shell(-1.0, open.shapes()), "shell failed");
+    err_contains(rounded.shell(-1.0, &[]), "shell failed");
+    // A lofted duct can't be offset either; the error suggests subtracting an inside instead.
+    let duct = Shape::loft(
+        &[
+            Shape::rect_on(&Plane::new(v(0.0, 0.0, 25.0), DVec3::Z).unwrap(), 20.0, 15.0).unwrap(),
+            Shape::rect_on(&Plane::new(v(0.0, 4.0, 12.5), v(0.0, 0.3, 1.0)).unwrap(), 22.0, 9.0)
+                .unwrap(),
+            Shape::rect_on(&Plane::new(v(0.0, 12.0, 0.0), v(0.0, 1.0, 0.5)).unwrap(), 30.0, 3.0)
+                .unwrap(),
+        ],
+        true,
+    )
+    .unwrap();
+    let ends =
+        duct.faces().farthest(DVec3::Z).unwrap().union(&duct.faces().farthest(DVec3::Y).unwrap());
+    err_contains(duct.shell(-1.2, ends.shapes()), "subtract it");
+
     let square = Shape::rect_on(&Plane::xy(), 4.0, 4.0).unwrap();
     let grown = Shape::face_from(&square).unwrap().offset_2d(1.0).unwrap();
     assert_eq!(grown.shape_type(), ShapeType::Face);
