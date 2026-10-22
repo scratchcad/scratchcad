@@ -13,6 +13,14 @@ mod inner {
         BRepOffset_RectoVerso,
     }
 
+    #[derive(Debug)]
+    #[repr(u32)]
+    pub enum Approx_ParametrizationType {
+        Approx_ChordLength,
+        Approx_Centripetal,
+        Approx_IsoParametric,
+    }
+
     unsafe extern "C++" {
         include!("scratchcad-occt-sys/include/b_rep_offset_api.hxx");
 
@@ -25,6 +33,7 @@ mod inner {
         type Handle_Law_Function = crate::law::Handle_Law_Function;
 
         type BRepOffset_Mode;
+        type Approx_ParametrizationType;
 
         type BRepOffsetAPI_MakeOffset;
         #[cxx_name = "construct_unique"]
@@ -121,7 +130,16 @@ mod inner {
             self: Pin<&mut BRepOffsetAPI_ThruSections>,
             wire: &TopoDS_Wire,
         ) -> Result<()>;
+        #[cxx_name = "construct_unique"]
+        pub fn BRepOffsetAPI_ThruSections_new_ruled(
+            is_solid: bool,
+            ruled: bool,
+        ) -> UniquePtr<BRepOffsetAPI_ThruSections>;
         pub fn CheckCompatibility(self: Pin<&mut BRepOffsetAPI_ThruSections>, check: bool);
+        pub fn SetParType(
+            self: Pin<&mut BRepOffsetAPI_ThruSections>,
+            par_type: Approx_ParametrizationType,
+        );
         pub fn Shape(self: Pin<&mut BRepOffsetAPI_ThruSections>) -> Result<&TopoDS_Shape>;
         pub fn Build(
             self: Pin<&mut BRepOffsetAPI_ThruSections>,

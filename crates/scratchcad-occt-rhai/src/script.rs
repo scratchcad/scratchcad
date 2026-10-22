@@ -380,6 +380,12 @@ fn register_constructors(engine: &mut Engine) {
         })
         .register_fn("loft", |sections: Dynamic, solid: bool| -> RhaiResult<Shape> {
             Ok(Shape::loft(&shapes(&sections)?, solid)?)
+        })
+        .register_fn("ruled_loft", |sections: Dynamic| -> RhaiResult<Shape> {
+            Ok(Shape::ruled_loft(&shapes(&sections)?, true)?)
+        })
+        .register_fn("ruled_loft", |sections: Dynamic, solid: bool| -> RhaiResult<Shape> {
+            Ok(Shape::ruled_loft(&shapes(&sections)?, solid)?)
         });
 }
 

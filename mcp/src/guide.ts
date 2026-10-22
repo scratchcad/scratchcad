@@ -34,7 +34,7 @@ Solids:
 - box(dx, dy, dz) has a corner at the origin; box_centered(dx, dy, dz) is centered on it; box_from_corners(a, b); cube(s)
 - cylinder(r, h) stands on the XY plane around Z; cylinder(base, axis, r, h), e.g. cylinder([0, 0, -1], "Z", 3, 12)
 - sphere(r), sphere(center, r), cone(r1, r2, h), torus(R, r)
-- loft(sections) or loft(sections, true) for a solid through wires; fuse_all(shapes)
+- loft(sections) or loft(sections, true) for a solid through wires, smooth: space the sections evenly, as it swings past unevenly spaced ones; ruled_loft(sections) joins each to the next with straight lines and stays between them; fuse_all(shapes)
 
 Curves, wires and faces (to extrude, revolve, sweep or loft):
 - line(a, b), arc(start, mid, end), spline(points), spline(points, closed), bezier(points)

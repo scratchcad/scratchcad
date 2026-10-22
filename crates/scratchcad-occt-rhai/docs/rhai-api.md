@@ -47,7 +47,7 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 | `polygon(points)`, `polygon(plane, points_2d)`, `polyline(points)` | closed / open wire |
 | `spline(points)`, `spline(points, closed)`, `bezier(points)` | edges |
 | `wire(edges)`, `face(wire)`, `face(outer, holes)`, `compound(shapes)` | assemblies |
-| `fuse_all(shapes)`, `loft(sections)`, `loft(sections, solid)` | solids |
+| `fuse_all(shapes)`, `loft(sections)`, `loft(sections, solid)`, `ruled_loft(sections)`, `ruled_loft(sections, solid)` | solids (a smooth loft can swing past unevenly spaced sections; a ruled one joins each to the next with straight lines) |
 | `sketch()`, `sketch(plane)` | a `Sketch` (see below) |
 | `vec3(x, y, z)`, `plane(name)`, `plane(origin, normal)`, `plane(origin, normal, x_dir)` | values |
 

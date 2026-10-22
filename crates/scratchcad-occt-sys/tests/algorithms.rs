@@ -332,6 +332,20 @@ fn pipes_and_lofts() {
     loft.pin_mut().Build(&progress()).unwrap();
     assert!(loft.IsDone());
     assert_close(volume(loft.pin_mut().Shape().unwrap()).abs(), 14.0 * PI / 3.0, 1e-4);
+
+    // A ruled loft through three circles is two frustums; a smooth one bulges between them.
+    let lofted = |ruled: bool| {
+        let mut loft = offset::BRepOffsetAPI_ThruSections_new_ruled(true, ruled);
+        loft.pin_mut().SetParType(offset::Approx_ParametrizationType::Approx_Centripetal);
+        for (z, r) in [(0.0, 1.0), (2.0, 2.0), (4.0, 1.0)] {
+            loft.pin_mut().AddWire(&circle_wire(z, r)).unwrap();
+        }
+        loft.pin_mut().Build(&progress()).unwrap();
+        assert!(loft.IsDone());
+        volume(loft.pin_mut().Shape().unwrap()).abs()
+    };
+    assert_close(lofted(true), 2.0 * 14.0 * PI / 3.0, 1e-4);
+    assert!(lofted(false) > 2.0 * 14.0 * PI / 3.0 + 1.0);
 }
 
 #[test]

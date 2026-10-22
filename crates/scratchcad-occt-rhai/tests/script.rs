@@ -173,6 +173,12 @@ fn curve_and_profile_constructors() {
         run::<String>("loft([circle(1), circle([0, 0, 2], \"Z\", 2)], false).shape_type()"),
         "shell"
     );
+    let ruled = "ruled_loft([circle(1), circle([0, 0, 2], \"Z\", 2), circle([0, 0, 4], \"Z\", 1)])";
+    assert_close(f(&format!("{ruled}.volume()")), 28.0 * PI / 3.0, 1e-4);
+    assert_eq!(
+        run::<String>("ruled_loft([circle(1), circle([0, 0, 2], \"Z\", 2)], false).shape_type()"),
+        "shell"
+    );
 
     fails("polygon([[0, 0], [1, 0]])", "at least 3 distinct points");
     fails("polygon([1, 2, 3])", "polygon point must be a vec3");

@@ -873,15 +873,34 @@ impl Shape {
         )))
     }
 
-    /// A shape passing through all sections (wires, or faces whose outer wire is used).
+    /// A smooth shape passing through all sections (wires, or faces whose outer wire is used).
+    ///
+    /// Through three or more sections it can swing past them, the more so the more unevenly
+    /// they are spaced. OpenCASCADE spaces the sections along the loft by the distances between
+    /// them, which lofted circles of radius 12 to 16 at x = 0, 90, 172 and 180 to a radius
+    /// between 4.3 and 21.4; by the square roots of the distances (centripetally), as here, the
+    /// same loft stays between 10.1 and 16.3. [`ruled_loft`](Self::ruled_loft) stays between
+    /// its sections.
     pub fn loft(sections: &[Shape], solid: bool) -> Result<Self> {
+        Self::loft_through(sections, solid, false)
+    }
+
+    /// A shape joining each section to the next with straight lines, so it stays between its
+    /// sections, with a crease at each.
+    pub fn ruled_loft(sections: &[Shape], solid: bool) -> Result<Self> {
+        Self::loft_through(sections, solid, true)
+    }
+
+    fn loft_through(sections: &[Shape], solid: bool, ruled: bool) -> Result<Self> {
         if sections.len() < 2 {
             return Err(invalid("a loft needs at least 2 sections"));
         }
         // OpenCASCADE 7.8 ignores the progress range of lofts, fillets and chamfers, so they
         // cannot be interrupted once started; at least do not start them after a cancel.
         crate::cancel::check()?;
-        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new(solid);
+        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new_ruled(solid, ruled);
+        make.pin_mut()
+            .SetParType(ffi::b_rep_offset_api::Approx_ParametrizationType::Approx_Centripetal);
         for section in sections {
             let wire = match section.shape_type() {
                 ShapeType::Face => section.outer_wire()?,

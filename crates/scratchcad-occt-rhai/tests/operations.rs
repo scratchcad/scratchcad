@@ -183,6 +183,32 @@ fn revolutions_sweeps_and_lofts() {
 }
 
 #[test]
+fn lofts_through_unevenly_spaced_sections() {
+    // Circles of radius 12 to 16 at x = 0, 90, 172 and 180: spaced by the distances between
+    // them, the smooth loft swung to a radius between 4.3 and 21.4.
+    let rings: Vec<Shape> = [(0.0, 12.0), (90.0, 13.0), (172.0, 16.0), (180.0, 11.0)]
+        .iter()
+        .map(|(x, r)| Shape::circle(v(*x, 0.0, 0.0), DVec3::X, *r).unwrap())
+        .collect();
+    let radius_at = |loft: &Shape, x: f64| {
+        let slice = Shape::box_centered(0.2, 200.0, 200.0).unwrap().translate(v(x, 0.0, 0.0));
+        loft.common(&slice.unwrap()).unwrap().bounding_box().unwrap().size().y / 2.0
+    };
+    let smooth = Shape::loft(&rings, true).unwrap();
+    let radii: Vec<f64> = [10.0, 45.0, 135.0, 176.0].map(|x| radius_at(&smooth, x)).to_vec();
+    assert!(radii.iter().all(|r| (10.0..16.5).contains(r)), "{radii:?}");
+    // A ruled loft runs straight from each section to the next: the slices' widest ends, at
+    // x = 45.1 and 175.9, are where they are measured.
+    let ruled = Shape::ruled_loft(&rings, true).unwrap();
+    assert!(ruled.is_valid());
+    assert_close(radius_at(&ruled, 45.0), 12.0 + 45.1 / 90.0, 1e-4);
+    assert_close(radius_at(&ruled, 176.0), 16.0 - 5.0 * 3.9 / 8.0, 1e-4);
+    let skin = Shape::ruled_loft(&rings[..2], false).unwrap();
+    assert_eq!(skin.shape_type(), ShapeType::Shell);
+    err_contains(Shape::ruled_loft(&rings[..1], true), "at least 2 sections");
+}
+
+#[test]
 fn sweeps_that_come_out_inside_out_fail() {
     // A paper clip: a wire swept along a polyline through arcs of points that doubles back and
     // crosses itself, with the profile a little off square. OpenCASCADE returned a solid its
