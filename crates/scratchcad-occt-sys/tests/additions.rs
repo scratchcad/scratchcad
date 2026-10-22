@@ -100,8 +100,9 @@ fn non_destructive_booleans() {
     builder.Add(tools.pin_mut(), &b).unwrap();
     builder.Add(tools.pin_mut(), &make_box_at(2.0, 2.0, 2.0, 1.0, 1.0, 1.0)).unwrap();
     builder.Add(tools.pin_mut(), &make_box_at(10.0, 0.0, 0.0, 1.0, 1.0, 1.0)).unwrap();
-    let all = b_rep_algo_api::BRepAlgoAPI_fuse_children(&a, &tools, &progress(), &mut String::new())
-        .unwrap();
+    let all =
+        b_rep_algo_api::BRepAlgoAPI_fuse_children(&a, &tools, &progress(), &mut String::new())
+            .unwrap();
     assert_close(volume(&all), 16.0, 1e-9);
     assert_eq!(unique_count(&all, TopAbs_ShapeEnum::TopAbs_SOLID), 2);
 }

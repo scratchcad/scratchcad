@@ -42,7 +42,7 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 | `cylinder(r, h)`, `cylinder(base, axis, r, h)` | solid cylinder |
 | `sphere(r)`, `sphere(center, r)`, `cone(r1, r2, h)`, `torus(R, r)` | solids |
 | `vertex(p)`, `line(a, b)`, `arc(start, mid, end)` | vertex / edges |
-| `circle(r)`, `circle(plane, r)`, `circle(center, normal, r)` | closed wire |
+| `circle(r)`, `circle(plane, r)`, `circle(center, normal, r)` | closed wire; `circle(center, normal, r)` starts toward +Z when the normal is within 60° of horizontal, else toward +X, so lofts through circles along a path do not twist |
 | `rect(w, h)`, `rect(plane, w, h)` | closed wire, centered |
 | `polygon(points)`, `polygon(plane, points_2d)`, `polyline(points)` | closed / open wire |
 | `spline(points)`, `spline(points, closed)`, `bezier(points)` | edges |

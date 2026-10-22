@@ -450,9 +450,16 @@ impl Shape {
         Self::from_raw(ffi::topo_ds::cast_edge_to_shape(make.pin_mut().Edge()?))
     }
 
-    /// A full circle as a closed edge.
+    /// A full circle as a closed edge. It starts (its seam is) on the side of the center
+    /// toward +Z when the normal is within 60 degrees of horizontal, and toward +X otherwise, so
+    /// circles whose normals differ a little start in nearly the same place, and lofts through
+    /// them do not twist: circles along a helix around Z all start on top. (OpenCASCADE's own
+    /// choice jumps to the opposite side as the normal turns.)
     pub fn circle_edge(center: DVec3, normal: DVec3, radius: f64) -> Result<Self> {
-        Self::circle_edge_around(&*axis2(center, normal)?, radius)
+        let n = crate::math::normalize(normal)?;
+        let reference = if n.z.abs() < 0.5 { DVec3::Z } else { DVec3::X };
+        let plane = Plane::with_x_dir(center, n, reference)?;
+        Self::circle_edge_around(&*plane.to_ax2()?, radius)
     }
 
     fn circle_edge_around(axis: &ffi::gp::gp_Ax2, radius: f64) -> Result<Self> {
@@ -1088,9 +1095,9 @@ impl Shape {
     /// Through three or more sections it can swing past them, the more so the more unevenly
     /// they are spaced. OpenCASCADE spaces the sections along the loft by the distances between
     /// them, which lofted circles of radius 12 to 16 at x = 0, 90, 172 and 180 to a radius
-    /// between 4.3 and 21.4; by the square roots of the distances (centripetally), as here, the
-    /// same loft stays between 10.1 and 16.3. [`ruled_loft`](Self::ruled_loft) stays between
-    /// its sections.
+    /// between 4.3 and 21.4; by the square roots of the distances (centripetally), as here when
+    /// one gap between sections is more than twice another, the same loft stays between 10.1
+    /// and 16.3. [`ruled_loft`](Self::ruled_loft) stays between its sections.
     pub fn loft(sections: &[Shape], solid: bool) -> Result<Self> {
         Self::loft_through(sections, solid, false)
     }
@@ -1108,22 +1115,47 @@ impl Shape {
         // OpenCASCADE 7.8 ignores the progress range of lofts, fillets and chamfers, so they
         // cannot be interrupted once started; at least do not start them after a cancel.
         crate::cancel::check()?;
-        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new_ruled(solid, ruled);
-        make.pin_mut()
-            .SetParType(ffi::b_rep_offset_api::Approx_ParametrizationType::Approx_Centripetal);
-        for section in sections {
-            let wire = match section.shape_type() {
-                ShapeType::Face => section.outer_wire()?,
-                ShapeType::Edge => Self::wire_from(std::slice::from_ref(section))?,
-                _ => section.clone(),
-            };
-            make.pin_mut().AddWire(wire.wire()?)?;
-        }
-        make.pin_mut().Build(&progress())?;
-        if !make.IsDone() {
-            return Err(failed("loft"));
-        }
-        Self::from_algorithm(make.pin_mut().Shape()?)
+        let wires = sections
+            .iter()
+            .map(|section| match section.shape_type() {
+                ShapeType::Face => section.outer_wire(),
+                ShapeType::Edge => Self::wire_from(std::slice::from_ref(section)),
+                _ => Ok(section.clone()),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // Where the gaps between sections differ a lot, space them centripetally (see `loft`).
+        // Evenly spaced sections, such as a thread's, keep OpenCASCADE's spacing: the other
+        // changes the surfaces a little there too, enough to make a cut through a slot that
+        // grazes a bore miss.
+        let centers = wires
+            .iter()
+            .map(|wire| wire.bounding_box().map(|b| (b.min + b.max) / 2.0))
+            .collect::<Result<Vec<_>>>()?;
+        let gaps: Vec<f64> = centers.windows(2).map(|pair| pair[0].distance(pair[1])).collect();
+        let narrowest = gaps.iter().copied().fold(f64::INFINITY, f64::min);
+        let uneven = gaps.iter().any(|gap| *gap > 2.0 * narrowest);
+        // OpenCASCADE first makes the sections compatible, matching up their vertices so sections
+        // with different numbers of edges loft; that step fails on long runs of circles (more than
+        // two turns of a helix), which loft fine without it.
+        let attempt = |compatible: bool| -> Result<Self> {
+            let mut make =
+                ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new_ruled(solid, ruled);
+            if uneven {
+                make.pin_mut().SetParType(
+                    ffi::b_rep_offset_api::Approx_ParametrizationType::Approx_Centripetal,
+                );
+            }
+            make.pin_mut().CheckCompatibility(compatible);
+            for wire in &wires {
+                make.pin_mut().AddWire(wire.wire()?)?;
+            }
+            make.pin_mut().Build(&progress())?;
+            if !make.IsDone() {
+                return Err(failed("loft"));
+            }
+            Self::from_algorithm(make.pin_mut().Shape()?)
+        };
+        attempt(true).or_else(|_| attempt(false))
     }
 
     fn require_edges(&self, edges: &[Shape], what: &str) -> Result<()> {
