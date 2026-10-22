@@ -223,16 +223,6 @@ fn planar_offsets() {
     // Four straight sides plus four quarter circles.
     assert_close(length(make.pin_mut().Shape().unwrap()), 16.0 + 2.0 * PI, 1e-6);
 
-    // Approximating changes nothing for lines and arcs.
-    let mut make = offset::BRepOffsetAPI_MakeOffset_face_new(
-        TopoDS::Face(&face).unwrap(),
-        GeomAbs_JoinType::GeomAbs_Arc,
-    )
-    .unwrap();
-    make.pin_mut().SetApprox(true);
-    make.pin_mut().Perform(1.0, 0.0).unwrap();
-    assert_close(length(make.pin_mut().Shape().unwrap()), 16.0 + 2.0 * PI, 1e-6);
-
     let mut make =
         offset::BRepOffsetAPI_MakeOffset_wire_new(&wire, GeomAbs_JoinType::GeomAbs_Intersection)
             .unwrap();
@@ -336,7 +326,6 @@ fn pipes_and_lofts() {
     // A ruled loft through three circles is two frustums; a smooth one bulges between them.
     let lofted = |ruled: bool| {
         let mut loft = offset::BRepOffsetAPI_ThruSections_new_ruled(true, ruled);
-        loft.pin_mut().SetParType(offset::Approx_ParametrizationType::Approx_Centripetal);
         for (z, r) in [(0.0, 1.0), (2.0, 2.0), (4.0, 1.0)] {
             loft.pin_mut().AddWire(&circle_wire(z, r)).unwrap();
         }

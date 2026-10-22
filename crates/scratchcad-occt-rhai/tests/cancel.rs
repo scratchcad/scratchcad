@@ -61,13 +61,16 @@ fn operations_stop_when_already_cancelled() {
 #[test]
 fn operations_run_normally_under_a_live_token() {
     let token = CancelToken::new();
+    // The sphere is off the cube's faces: centred on its corner, the sphere's seam lies in one
+    // of them, and OpenCASCADE's cut then removed nothing.
     let volume = with_cancel(&token, || {
-        let part = cube10().fillet_all(0.5)?.cut(&Shape::sphere(6.0).unwrap())?;
+        let ball = Shape::sphere_at(v(0.1, 0.2, 0.3), 6.0).unwrap();
+        let part = cube10().fillet_all(0.5)?.cut(&ball)?;
         let bytes = part.to_bytes(Format::Step, &MeshOptions::new(0.1))?;
         Shape::from_step(&bytes)?.volume()
     })
     .unwrap();
-    assert!(volume > 0.0 && volume < 1000.0);
+    assert!(volume > 800.0 && volume < 900.0, "{volume}");
     assert!(!token.is_cancelled());
 }
 

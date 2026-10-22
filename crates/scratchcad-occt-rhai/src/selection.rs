@@ -137,18 +137,19 @@ impl Selection {
     }
 
     /// The direction associated with a shape for direction filters: the normal of a planar
-    /// face or the direction of a straight edge. Other shapes have none.
-    pub(crate) fn characteristic_direction(shape: &Shape) -> Option<DVec3> {
-        match shape.geom_type() {
-            Ok("plane") => shape.normal().ok(),
-            Ok("line") => shape.line_direction().ok(),
+    /// face or the direction of a straight edge. Other shapes have none. Fails where that
+    /// direction can't be found, rather than leave the shape out of the selection.
+    pub(crate) fn characteristic_direction(shape: &Shape) -> Result<Option<DVec3>> {
+        Ok(match shape.geom_type() {
+            Ok("plane") => Some(shape.normal()?),
+            Ok("line") => Some(shape.line_direction()?),
             _ => None,
-        }
+        })
     }
 
     fn filter_direction(&self, dir: DVec3, keep: impl Fn(f64) -> bool) -> Result<Selection> {
         let dir = normalize(dir)?;
-        self.filter(|s| Ok(Self::characteristic_direction(s).is_some_and(|d| keep(d.dot(dir)))))
+        self.filter(|s| Ok(Self::characteristic_direction(s)?.is_some_and(|d| keep(d.dot(dir)))))
     }
 
     /// Planar faces whose normal, or straight edges whose direction, is parallel to `dir`

@@ -139,17 +139,6 @@ pub fn to_shape(value: Dynamic) -> RhaiResult<Shape> {
     Err(invalid(format!("the script must evaluate to a shape, got {}", value.type_name())))
 }
 
-type Ctx<'a> = NativeCallContext<'a>;
-
-/// Runs an operation called from a script, placing any notes it records (see
-/// [`take_notes`](crate::take_notes)) at the call's position in the script.
-fn at<T>(ctx: &Ctx, op: impl FnOnce() -> CrateResult<T>) -> RhaiResult<T> {
-    let start = crate::notes::count();
-    let result = op();
-    crate::notes::locate(start, &ctx.call_position().to_string());
-    Ok(result?)
-}
-
 fn shape_array(selection: &Selection) -> Array {
     selection.iter().cloned().map(Dynamic::from).collect()
 }
@@ -400,9 +389,8 @@ fn register_constructors(engine: &mut Engine) {
         .register_fn("compound", |parts: Dynamic| -> RhaiResult<Shape> {
             Ok(Shape::compound(&shapes(&parts)?)?)
         })
-        .register_fn("fuse_all", |c: Ctx, parts: Dynamic| -> RhaiResult<Shape> {
-            let parts = shapes(&parts)?;
-            at(&c, || Shape::fuse_all(&parts))
+        .register_fn("fuse_all", |parts: Dynamic| -> RhaiResult<Shape> {
+            Ok(Shape::fuse_all(&shapes(&parts)?)?)
         })
         .register_fn("loft", |sections: Dynamic| -> RhaiResult<Shape> {
             Ok(Shape::loft(&shapes(&sections)?, true)?)
@@ -451,15 +439,19 @@ fn register_shape(engine: &mut Engine) {
             Ok(s.classify(vector(&p, "point")?)?.name().to_string())
         })
         // Booleans
-        .register_fn("fuse", |c: Ctx, a: &mut Shape, b: Shape| at(&c, || a.fuse(&b)))
-        .register_fn("union", |c: Ctx, a: &mut Shape, b: Shape| at(&c, || a.fuse(&b)))
-        .register_fn("cut", |c: Ctx, a: &mut Shape, b: Shape| at(&c, || a.cut(&b)))
-        .register_fn("common", |c: Ctx, a: &mut Shape, b: Shape| at(&c, || a.common(&b)))
-        .register_fn("intersect", |c: Ctx, a: &mut Shape, b: Shape| at(&c, || a.common(&b)))
-        .register_fn("section", |c: Ctx, a: &mut Shape, b: Shape| at(&c, || a.section(&b)))
-        .register_fn("+", |c: Ctx, a: Shape, b: Shape| at(&c, || a.fuse(&b)))
-        .register_fn("-", |c: Ctx, a: Shape, b: Shape| at(&c, || a.cut(&b)))
-        .register_fn("&", |c: Ctx, a: Shape, b: Shape| at(&c, || a.common(&b)))
+        .register_fn("fuse", |a: &mut Shape, b: Shape| -> RhaiResult<Shape> { Ok(a.fuse(&b)?) })
+        .register_fn("union", |a: &mut Shape, b: Shape| -> RhaiResult<Shape> { Ok(a.fuse(&b)?) })
+        .register_fn("cut", |a: &mut Shape, b: Shape| -> RhaiResult<Shape> { Ok(a.cut(&b)?) })
+        .register_fn("common", |a: &mut Shape, b: Shape| -> RhaiResult<Shape> { Ok(a.common(&b)?) })
+        .register_fn("intersect", |a: &mut Shape, b: Shape| -> RhaiResult<Shape> {
+            Ok(a.common(&b)?)
+        })
+        .register_fn("section", |a: &mut Shape, b: Shape| -> RhaiResult<Shape> {
+            Ok(a.section(&b)?)
+        })
+        .register_fn("+", |a: Shape, b: Shape| -> RhaiResult<Shape> { Ok(a.fuse(&b)?) })
+        .register_fn("-", |a: Shape, b: Shape| -> RhaiResult<Shape> { Ok(a.cut(&b)?) })
+        .register_fn("&", |a: Shape, b: Shape| -> RhaiResult<Shape> { Ok(a.common(&b)?) })
         // Transforms
         .register_fn("translate", |s: &mut Shape, v: Dynamic| -> RhaiResult<Shape> {
             Ok(s.translate(vector(&v, "translation")?)?)

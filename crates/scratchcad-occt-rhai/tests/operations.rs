@@ -137,7 +137,6 @@ fn measuring_leaves_shapes_alone() {
     // 2 pi^2 R r^2 for the torus, and 128.232 of the cylinder outside it (integrated numerically).
     let exact = 2.0 * PI * PI * 17.5 * 25.0 + 128.232008;
     let mass = fused.mass_properties().unwrap();
-    assert!(mass.exact);
     assert_close(mass.volume, exact, 1e-6 * exact);
     assert_close(fused.volume().unwrap(), exact, 1e-6 * exact);
     assert!(fused.is_valid() && torus.is_valid());
@@ -145,9 +144,10 @@ fn measuring_leaves_shapes_alone() {
 }
 
 #[test]
-fn measures_approximately_what_cannot_be_split() {
+fn what_cannot_be_measured_exactly_fails() {
     // A helical slot whose inner edge runs along a bore of the same radius: OpenCASCADE cannot
-    // split the result into Bézier patches, so it is measured directly, and says so.
+    // split the result into Bézier patches, so it can't be measured exactly, and the cut, whose
+    // result can't then be checked, fails rather than return an unchecked shape.
     let blade = Shape::polygon(&[
         v(2.5, 0.0, -0.35),
         v(10.5, 0.0, -0.35),
@@ -164,16 +164,36 @@ fn measures_approximately_what_cannot_be_split() {
         .collect();
     let tube =
         Shape::cylinder(9.5, 25.0).unwrap().cut(&Shape::cylinder(2.5, 25.0).unwrap()).unwrap();
-    let slotted = tube.cut(&Shape::loft(&sections, true).unwrap()).unwrap();
-    let mass = slotted.mass_properties().unwrap();
-    assert!(!mass.exact);
-    // The tube's volume, less a slot 0.7 mm wide through its 7 mm wall over three turns (about
-    // 2 pi 6 mm long each).
-    let slot = 0.7 * 7.0 * 3.0 * 2.0 * PI * 6.0;
-    let tube_volume = PI * (9.5 * 9.5 - 2.5 * 2.5) * 25.0;
-    assert_close(mass.volume, tube_volume - slot, 0.02 * slot);
-    assert_close(slotted.volume().unwrap(), mass.volume, 1e-9);
-    assert!(slotted.is_valid());
+    let m = err(tube.cut(&Shape::loft(&sections, true).unwrap())).to_string();
+    assert!(m.contains("the cut could not be checked, so its result is not used"), "{m}");
+    assert!(m.contains("such as a tool whose edge runs along a bore of the same radius"), "{m}");
+    assert!(m.contains("can't be measured exactly: OpenCASCADE could not split"), "{m}");
+}
+
+#[test]
+fn measures_shells_of_spline_solids_exactly() {
+    // Shelling a spline-sided solid makes offset surfaces, which can't be turned into Bézier
+    // patches; split where their base surface's knots are, they integrate exactly too. A smooth
+    // outline's inward offset by d has the area A - P d + pi d², so the walls of a cup shelled d
+    // thick hold A h - (A - P d + pi d²)(h - d).
+    let points: Vec<DVec3> = (0..36)
+        .map(|i| {
+            let a = (i as f64 * 10.0).to_radians();
+            let r = 10.0 * (1.0 + 0.08 * (3.0 * a).cos());
+            v(r * a.cos(), r * a.sin(), 0.0)
+        })
+        .collect();
+    let outline = Shape::wire_from(&[Shape::spline(&points, true).unwrap()]).unwrap();
+    let base = Shape::face_from(&outline).unwrap();
+    let (area, perimeter) = (base.area().unwrap(), base.length().unwrap());
+    let (h, d) = (10.0, 0.5);
+    let solid = base.extrude(v(0.0, 0.0, h)).unwrap();
+    let top = solid.faces().farthest(DVec3::Z).unwrap();
+    let cup = solid.shell(-d, top.shapes()).unwrap();
+    assert!(cup.is_valid());
+    assert!(cup.faces().iter().any(|f| f.geom_type().unwrap() == "offset"));
+    let walls = area * h - (area - perimeter * d + PI * d * d) * (h - d);
+    assert_close(cup.volume().unwrap(), walls, 1e-7 * walls);
 }
 
 #[test]
@@ -286,8 +306,8 @@ fn revolutions_sweeps_and_lofts() {
 
 #[test]
 fn lofts_through_unevenly_spaced_sections() {
-    // Circles of radius 12 to 16 at x = 0, 90, 172 and 180: spaced by the distances between
-    // them, the smooth loft swung to a radius between 4.3 and 21.4.
+    // Circles of radius 11 to 16 at x = 0, 90, 172 and 180: the smooth loft swings past them,
+    // to a radius between 4.3 and 21.4, which is what ruled_loft is for.
     let rings: Vec<Shape> = [(0.0, 12.0), (90.0, 13.0), (172.0, 16.0), (180.0, 11.0)]
         .iter()
         .map(|(x, r)| Shape::circle(v(*x, 0.0, 0.0), DVec3::X, *r).unwrap())
@@ -297,8 +317,8 @@ fn lofts_through_unevenly_spaced_sections() {
         loft.common(&slice.unwrap()).unwrap().bounding_box().unwrap().size().y / 2.0
     };
     let smooth = Shape::loft(&rings, true).unwrap();
-    let radii: Vec<f64> = [10.0, 45.0, 135.0, 176.0].map(|x| radius_at(&smooth, x)).to_vec();
-    assert!(radii.iter().all(|r| (10.0..16.5).contains(r)), "{radii:?}");
+    assert_close(radius_at(&smooth, 45.0), 4.29, 0.01);
+    assert_close(radius_at(&smooth, 135.0), 21.40, 0.01);
     // A ruled loft runs straight from each section to the next: the slices' widest ends, at
     // x = 45.1 and 175.9, are where they are measured.
     let ruled = Shape::ruled_loft(&rings, true).unwrap();
@@ -311,10 +331,10 @@ fn lofts_through_unevenly_spaced_sections() {
 }
 
 #[test]
-fn sweeps_that_come_out_inside_out_fail() {
+fn sweeps_along_paths_that_cross_themselves_fail() {
     // A paper clip: a wire swept along a polyline through arcs of points that doubles back and
-    // crosses itself, with the profile a little off square. OpenCASCADE returned a solid its
-    // checker passes, of 1 mm³ where the wire holds 71, with its center of mass far outside it.
+    // crosses itself, with the profile a little off square. BRepOffsetAPI_MakePipe returned a
+    // solid its checker passes, of 1 mm³ where the wire holds 71; the pipe shell's is invalid.
     let arc = |cx: f64, cy: f64, r: f64, from: f64, to: f64, n: usize| -> Vec<DVec3> {
         (0..=n)
             .map(|i| {
@@ -330,8 +350,8 @@ fn sweeps_that_come_out_inside_out_fail() {
     points.push(v(9.9, 2.0, 0.0));
     let wire = Shape::face_from(&Shape::circle(points[0], DVec3::X, 0.45).unwrap()).unwrap();
     let error = err(wire.sweep(&Shape::polyline(&points).unwrap())).to_string();
-    assert!(error.contains("sweep failed: the result came out partly inside out"), "{error}");
-    assert!(error.contains("lies outside its bounding box"), "{error}");
+    assert!(error.contains("sweep failed: the swept shape is invalid"), "{error}");
+    assert!(error.contains("square to it: circle(points[0]"), "{error}");
 
     // Along a spline through the same points, with the profile square to it, it sweeps right.
     let path = Shape::wire_from(&[Shape::spline(&points, false).unwrap()]).unwrap();
@@ -339,8 +359,6 @@ fn sweeps_that_come_out_inside_out_fail() {
     let profile = Shape::face_from(&Shape::circle(points[0], square, 0.45).unwrap()).unwrap();
     let clip = profile.sweep(&path).unwrap();
     assert_close(clip.volume().unwrap(), PI * 0.45 * 0.45 * path.length().unwrap(), 0.01);
-
-    assert!(error.contains("of volume where its sides imply about"), "{error}");
 
     // Around a ring of straight runs, BRepOffsetAPI_MakePipe's pieces cancelled out completely;
     // the pipe shell mitres the corners and sweeps it right.
@@ -358,23 +376,31 @@ fn sweeps_that_come_out_inside_out_fail() {
 
 #[test]
 fn sweeps_follow_helices_corners_and_holes() {
-    // A closed-end spring: one turn at 1.5 mm pitch, eight at 3.5, one at 1.5. Its pitch changes,
-    // which crashed the process with BRepOffsetAPI_MakePipe.
-    let mut z = 0.0;
-    let points: Vec<DVec3> = (0..=240)
-        .map(|i| {
-            let t = i as f64 / 24.0;
-            let a = t * 2.0 * PI;
-            let p = v(4.5 * a.cos(), 4.5 * a.sin(), z);
-            z += if !(1.0..9.0).contains(&t) { 1.5 } else { 3.5 } / 24.0;
-            p
-        })
-        .collect();
-    let path = Shape::spline(&points, false).unwrap();
-    let wire = Shape::face_from(&Shape::circle(v(4.5, 0.0, 0.0), DVec3::Y, 0.5).unwrap()).unwrap();
-    let spring = wire.sweep(&path).unwrap();
-    assert!(spring.is_valid());
-    assert_close(spring.volume().unwrap(), PI * 0.25 * path.length().unwrap(), 0.01 * 223.0);
+    // A spring of ten turns at 3.5 mm pitch.
+    let spring = |pitch: &dyn Fn(f64) -> f64| {
+        let mut z = 0.0;
+        let points: Vec<DVec3> = (0..=240)
+            .map(|i| {
+                let t = i as f64 / 24.0;
+                let a = t * 2.0 * PI;
+                let p = v(4.5 * a.cos(), 4.5 * a.sin(), z);
+                z += pitch(t) / 24.0;
+                p
+            })
+            .collect();
+        Shape::spline(&points, false).unwrap()
+    };
+    let path = spring(&|_| 3.5);
+    // With the profile square to the path, the coil holds its area times the path's length.
+    let square = path.tangent_at(0.0).unwrap();
+    let wire = Shape::face_from(&Shape::circle(v(4.5, 0.0, 0.0), square, 0.5).unwrap()).unwrap();
+    let coil = wire.sweep(&path).unwrap();
+    assert!(coil.is_valid());
+    assert_close(coil.volume().unwrap(), PI * 0.25 * path.length().unwrap(), 1e-3);
+    // A closed-end spring: one turn at 1.5 mm pitch, eight at 3.5, one at 1.5. BRepOffsetAPI_MakePipe
+    // crashed the process on it; the pipe shell can't keep the profile square along it, and says so.
+    let closed = spring(&|t| if !(1.0..9.0).contains(&t) { 1.5 } else { 3.5 });
+    err_contains(wire.sweep(&closed), "fails along some long helices whose pitch changes");
 
     // A tube: the hole in the profile sweeps too.
     let ring = Shape::face_with_holes(
@@ -393,17 +419,15 @@ fn sweeps_follow_helices_corners_and_holes() {
     assert_close(bent.volume().unwrap(), 4.0 * 20.0, 1e-6);
     let sheet = Shape::line(v(-1.0, 0.0, 0.0), v(1.0, 0.0, 0.0)).unwrap().sweep(&corner).unwrap();
     assert!(sheet.solids().is_empty() && !sheet.faces().is_empty());
-    // A picture hook: a line turning a corner into an arc, which only BRepOffsetAPI_MakePipe
-    // sweeps.
+    // A picture hook: a line turning a corner into an arc. Only BRepOffsetAPI_MakePipe swept
+    // it; the pipe shell's mitred corner is invalid, which is an error.
     let hook = Shape::wire_from(&[
         Shape::line(v(0.0, 0.6, 2.0), v(0.0, 6.0, -2.4)).unwrap(),
         Shape::arc(v(0.0, 6.0, -2.4), v(0.0, 12.0, -8.4), v(0.0, 15.6, -1.2)).unwrap(),
     ])
     .unwrap();
     let wire = Shape::circle(v(0.0, 0.6, 2.0), v(0.0, 5.4, -4.4), 1.5).unwrap();
-    let hooked = Shape::face_from(&wire).unwrap().sweep(&hook).unwrap();
-    assert!(hooked.is_valid());
-    assert_close(hooked.volume().unwrap(), 113.0, 1.0);
+    err_contains(Shape::face_from(&wire).unwrap().sweep(&hook), "the swept shape is invalid");
     // A point sweeps into a copy of the path.
     let traced = Shape::vertex_at(DVec3::ZERO).unwrap().sweep(&corner).unwrap();
     assert_close(traced.length().unwrap(), 20.0, 1e-9);
@@ -458,10 +482,9 @@ fn fillets_and_chamfers_that_break_the_solid_fail() {
 }
 
 #[test]
-fn fillets_skip_the_seams_booleans_leave() {
+fn fillets_of_faces_a_boolean_split_say_to_clean() {
     // A hub with two lobes on bridges, fused flush: the top stays split into coplanar faces,
-    // and selecting the top edges picks up the seams between them, which OpenCASCADE can't
-    // round here.
+    // and selecting the top edges picks up the seams between them.
     let lobe = Shape::cylinder_at(v(30.0, 0.0, 0.0), DVec3::Z, 14.5, 7.0)
         .unwrap()
         .fuse(&Shape::box_from_corners(v(0.0, -6.0, 0.0), v(30.0, 6.0, 7.0)).unwrap())
@@ -473,18 +496,25 @@ fn fillets_skip_the_seams_booleans_leave() {
         .fuse(&lobe.rotate(DVec3::ZERO, DVec3::Z, 180.0).unwrap())
         .unwrap();
     let top = part.edges().farthest(DVec3::Z).unwrap();
-    assert!(top.len() > part.clean().unwrap().edges().farthest(DVec3::Z).unwrap().len());
-    let volume = part.volume().unwrap();
-    let rounded = part.fillet(1.5, top.shapes()).unwrap();
+    let cleaned = part.clean().unwrap();
+    let clean_top = cleaned.edges().farthest(DVec3::Z).unwrap();
+    assert!(top.len() > clean_top.len());
+    // The seams are left out, as no corner, but OpenCASCADE can't round the edges that meet
+    // them either: the fillet fails, saying to clean the shape first.
+    err_contains(part.fillet(1.5, top.shapes()), "merge the faces with clean() first");
+    err_contains(part.chamfer(0.5, top.shapes()), "can't bevel edges that meet those");
+    // On the cleaned shape, with its edges selected there, both work.
+    let volume = cleaned.volume().unwrap();
+    let rounded = cleaned.fillet(1.5, clean_top.shapes()).unwrap();
     assert!(rounded.is_valid());
     assert!(rounded.volume().unwrap() < volume);
-    let bevelled = part.chamfer(0.5, top.shapes()).unwrap();
+    let bevelled = cleaned.chamfer(0.5, clean_top.shapes()).unwrap();
     assert!(bevelled.is_valid());
     assert!(bevelled.volume().unwrap() < volume);
 
-    // Seams alone leave nothing to round, and a radius too big for the faces fails either way;
-    // both say what to try instead.
-    let outline = Shape::compound(part.clean().unwrap().edges().shapes()).unwrap();
+    // Seams alone leave nothing to round, and a radius too big for the faces fails; both say
+    // what to try instead.
+    let outline = Shape::compound(clean_top.shapes()).unwrap();
     let seams: Vec<Shape> = top
         .iter()
         .filter(|e| {
@@ -494,8 +524,8 @@ fn fillets_skip_the_seams_booleans_leave() {
         .cloned()
         .collect();
     assert!(!seams.is_empty());
-    err_contains(part.fillet(1.0, &seams), "could not round the");
-    err_contains(part.chamfer(30.0, top.shapes()), "Try a smaller distance");
+    err_contains(part.fillet(1.0, &seams), "faces that continue each other: there is no corner");
+    err_contains(cleaned.chamfer(30.0, clean_top.shapes()), "Try a smaller distance");
     err_contains(cube10().fillet(20.0, &[cube10().edges().first().unwrap()]), "the selected edge");
 }
 
@@ -644,11 +674,13 @@ fn offsets_of_open_wires_and_tight_curves() {
     assert_close(around.area().unwrap(), 120.0 + 4.0 * PI + PI - 4.0, 1e-6);
     err_contains(bent.offset_2d(-1.0), "its offset must be positive");
     let upright = Shape::polyline(&[DVec3::ZERO, v(0.0, 0.0, 10.0)]).unwrap();
-    err_contains(upright.offset_2d(1.0), "a straight one must be horizontal");
+    err_contains(
+        upright.offset_2d(1.0),
+        "a straight line that isn't horizontal lies in many planes",
+    );
 
-    // A closed spline with 12 lobes, offset further than its tightest bends: OpenCASCADE's exact
-    // offset came out an invalid ring, which approximating the spline by arcs avoids, and where
-    // that fails too, the offset says so.
+    // A closed spline with 12 lobes: offset by less than its tightest bends, it gives a valid
+    // ring; offset further, OpenCASCADE's offset comes out crossing itself, which is an error.
     let lobes = |depth: f64| -> Shape {
         let points: Vec<DVec3> = (0..96)
             .map(|i| {
@@ -659,14 +691,15 @@ fn offsets_of_open_wires_and_tight_curves() {
             .collect();
         Shape::wire_from(&[Shape::spline(&points, true).unwrap()]).unwrap()
     };
-    let outline = lobes(1.5);
-    for distance in [3.8, -3.8] {
+    let outline = lobes(0.75);
+    for distance in [0.8, -0.8, 3.8, -3.8] {
         let offset = outline.offset_2d(distance).unwrap();
         let (outer, inner) = if distance > 0.0 { (&offset, &outline) } else { (&outline, &offset) };
         let ring = Shape::face_with_holes(outer, std::slice::from_ref(inner)).unwrap();
         assert!(ring.is_valid(), "{distance}");
         assert!(ring.extrude(v(0.0, 0.0, 1.5)).unwrap().is_valid(), "{distance}");
     }
+    err_contains(lobes(1.5).offset_2d(3.8), "comes out crossing itself");
     err_contains(lobes(3.0).offset_2d(3.8), "comes out crossing itself");
 }
 
@@ -718,9 +751,13 @@ fn measurements_and_queries() {
     let cylinder = Shape::cylinder(1.0, 2.0).unwrap();
     let side = cylinder.faces().of_type("cylinder").unwrap().single().unwrap();
     err_contains(side.plane(), "only planar faces");
-    let n = side.normal().unwrap();
-    assert_close(n.z, 0.0, 1e-9);
-    assert_close(n.length(), 1.0, 1e-9);
+    // A full cylinder's center lies on its axis, as near every point of its side as any other:
+    // the side has no one normal there. Half of it has.
+    err_contains(side.normal(), "there is no one normal there");
+    let half =
+        cylinder.cut(&Shape::box_from_corners(v(0.0, -2.0, -1.0), v(2.0, 2.0, 3.0)).unwrap());
+    let side = half.unwrap().faces().of_type("cylinder").unwrap().single().unwrap();
+    assert_vec_close(side.normal().unwrap(), DVec3::NEG_X, 1e-9);
     let kinds: Vec<_> = [
         Shape::sphere(1.0).unwrap(),
         Shape::cone(1.0, 0.0, 1.0).unwrap(),

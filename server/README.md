@@ -103,11 +103,10 @@ curl -s localhost:8080/v1/scripts/validate -H 'content-type: application/json' \
 
 `valid` is OpenCASCADE's checker's verdict. `warnings` names what will cause
 trouble later: an invalid shape, or one with no solids (a face or wire where a
-solid was probably meant), and booleans in the script that returned an invalid
-shape, with their line (a later operation can drop the damaged part and leave a
-valid shape that is missing it). The renders and exports report those booleans
-in their `x-warning` headers too. An invalid script returns the same `422` error the
-other endpoints would.
+solid was probably meant). A boolean, fillet, chamfer, sweep, loft, shell or
+offset that goes wrong fails the script at its line, rather than leave a damaged
+shape for a later operation to drop. An invalid script returns the same `422`
+error the other endpoints would.
 
 `volume`, `area` and `center` are exact to about 1e-7 of their size, also on
 lofts, sweeps and other B-spline surfaces, which are measured on a copy split
@@ -116,9 +115,9 @@ longest of anything here (seconds for a 29-blade blisk), so
 `"mass_properties": false` leaves the three out for callers that only need the
 shape's size and topology, such as the editor's preview.
 
-If the B-spline geometry can't be split into patches, the three are integrated directly
-instead, which can be off by about a percent, and a warning says so; if OpenCASCADE can't
-measure them at all, they are left out with a warning rather than failing the request.
+Where the geometry can't be split into pieces that are smooth throughout, the
+three are left out, with a warning saying why, rather than integrated
+approximately; the rest of the response still describes the shape.
 
 ### `POST /v1/raster/3d` → `image/png` (RGBA, transparent background)
 
@@ -183,7 +182,7 @@ The body is `{"script": ..., "tolerance": ...}`. `tolerance` applies to the
 mesh formats only (giving it for an exact format is a `400`): the largest
 distance between the mesh and the true surface, by default 1e-3 of the
 bounding box's diagonal and never finer than 1e-5 of it (a finer request is
-raised to that, with a warning). Meshes also follow curves to within 15
+a `400`, not meshed coarser than asked). Meshes also follow curves to within 15
 degrees, and may have at most `SCRATCHCAD_MAX_MESH_TRIANGLES` triangles. A file
 over `SCRATCHCAD_MAX_EXPORT_BYTES` is a `limit_exceeded` error; binary STL takes
 50 bytes per triangle.

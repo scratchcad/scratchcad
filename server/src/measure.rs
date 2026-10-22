@@ -52,24 +52,17 @@ fn array(v: DVec3) -> [f64; 3] {
     v.to_array()
 }
 
-/// The mass properties to report, and warnings about them: approximate ones are reported with a
-/// warning, and ones OpenCASCADE could not measure are left out with one.
+/// The mass properties to report, which are exact, or a warning saying why they can't be
+/// measured: a shape whose faces can't all be split into Bézier patches has no exact volume, and
+/// an approximate one is never reported.
 fn checked(measured: Result<MassProperties, Error>) -> (Option<MassProperties>, Vec<String>) {
     match measured {
-        Ok(m) if m.exact => (Some(m), vec![]),
-        Ok(m) => (
-            Some(m),
-            vec![
-                "the volume, area and center are approximate (to about a percent): the shape's \
-                  B-spline geometry could not be split into Bézier patches to measure it exactly"
-                    .into(),
-            ],
-        ),
+        Ok(m) => (Some(m), vec![]),
         Err(e) => (
             None,
             vec![format!(
-                "the volume, area and center are left out: OpenCASCADE could not measure them \
-                 ({e})"
+                "the volume, area and center are left out, as they could not be measured \
+                 exactly: {e}"
             )],
         ),
     }
@@ -77,7 +70,8 @@ fn checked(measured: Result<MassProperties, Error>) -> (Option<MassProperties>, 
 
 /// Measures the shape and lists what is likely to go wrong with it. Without `mass`, the
 /// volume, area and center, which take the longest to measure, are left out; they are also left
-/// out, with a warning, when OpenCASCADE can't measure them, as the rest still describes the shape.
+/// out, with a warning, when they can't be measured exactly, as the rest still describes the
+/// shape.
 pub fn summarize(shape: &Shape, mass: bool) -> Result<(ShapeSummary, Vec<String>), ApiError> {
     let bbox = bounding_box(shape)?;
     let valid = shape.is_valid();
@@ -188,21 +182,20 @@ mod tests {
     }
 
     #[test]
-    fn approximate_and_missing_mass_properties_are_warnings() {
+    fn unmeasurable_mass_properties_are_left_out_with_a_warning() {
         let m = MassProperties {
             volume: 1.0,
             area: 6.0,
             center: DVec3::ZERO,
-            exact: true,
         };
         assert_eq!(checked(Ok(m)), (Some(m), vec![]));
-        let rough = MassProperties { exact: false, ..m };
-        let (kept, notes) = checked(Ok(rough));
-        assert_eq!(kept, Some(rough));
-        assert!(notes[0].contains("approximate"));
         let (kept, notes) = checked(Err(Error::OperationFailed("split")));
         assert_eq!(kept, None);
-        assert!(notes[0].contains("left out") && notes[0].contains("split"));
+        assert!(
+            notes[0].contains("left out") && notes[0].contains("split"),
+            "{}",
+            notes[0]
+        );
     }
 
     #[test]

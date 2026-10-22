@@ -35,21 +35,20 @@ pub fn scale(diagonal: f64) -> f64 {
     if diagonal > 0.0 { diagonal } else { 1.0 }
 }
 
-/// The tolerance a mesh export uses: the requested one or the default, and
-/// a warning when the request was finer than the floor
-pub fn export_tolerance(requested: Option<f64>, diagonal: f64) -> (f64, Option<String>) {
+/// The tolerance a mesh export uses: the requested one or the default. A
+/// request finer than the floor is an error, rather than meshed coarser
+/// than asked
+pub fn export_tolerance(requested: Option<f64>, diagonal: f64) -> Result<f64, ApiError> {
     let scale = scale(diagonal);
     let floor = scale * MIN_RELATIVE_TOLERANCE;
     match requested {
-        None => (scale * DEFAULT_RELATIVE_TOLERANCE, None),
-        Some(t) if t < floor => (
-            floor,
-            Some(format!(
-                "tolerance {t} is finer than 1e-5 of the shape's bounding-box diagonal \
-                 ({diagonal:.6}), so the mesh uses {floor:.3e}"
-            )),
-        ),
-        Some(t) => (t, None),
+        None => Ok(scale * DEFAULT_RELATIVE_TOLERANCE),
+        Some(t) if t < floor => Err(ApiError::BadRequest(format!(
+            "tolerance {t} is finer than a mesh can be made, 1e-5 of the shape's \
+             bounding-box diagonal ({diagonal:.6}): ask for {floor:.3e} or more, or export \
+             STEP, IGES or BREP, which keep the exact surfaces"
+        ))),
+        Some(t) => Ok(t),
     }
 }
 
@@ -169,13 +168,18 @@ mod tests {
 
     #[test]
     fn export_tolerances() {
-        assert_eq!(export_tolerance(None, 100.0), (0.1, None));
-        assert_eq!(export_tolerance(Some(0.5), 100.0), (0.5, None));
-        let (t, warning) = export_tolerance(Some(1e-9), 100.0);
-        assert_eq!(t, 1e-3);
-        assert!(warning.unwrap().contains("finer than 1e-5"));
+        assert_eq!(export_tolerance(None, 100.0).unwrap(), 0.1);
+        assert_eq!(export_tolerance(Some(0.5), 100.0).unwrap(), 0.5);
+        assert_eq!(export_tolerance(Some(1e-3), 100.0).unwrap(), 1e-3);
+        let Err(ApiError::BadRequest(m)) = export_tolerance(Some(1e-9), 100.0) else {
+            panic!("a tolerance below the floor should be refused")
+        };
+        assert!(
+            m.contains("finer than a mesh can be made") && m.contains("1.000e-3"),
+            "{m}"
+        );
         // A point has no size; tolerances are relative to 1
-        assert_eq!(export_tolerance(None, 0.0), (1e-3, None));
+        assert_eq!(export_tolerance(None, 0.0).unwrap(), 1e-3);
     }
 
     #[test]

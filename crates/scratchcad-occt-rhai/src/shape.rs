@@ -1,7 +1,7 @@
 //! The [`Shape`] handle and every operation on it.
 
 use crate::{
-    cancel::{failed, or_retry, progress},
+    cancel::{failed, progress},
     error::{invalid, Error, Result},
     math::{
         self, axis1, axis2, fmt_vec, from_pnt, from_vec, point, require_finite,
@@ -381,6 +381,14 @@ impl Shape {
     pub fn torus(major_radius: f64, minor_radius: f64) -> Result<Self> {
         require_positive(major_radius, "torus major radius")?;
         require_positive(minor_radius, "torus minor radius")?;
+        // OpenCASCADE makes a torus whose tube is at least as wide as its ring, which crosses
+        // itself, and its checker passes it.
+        if minor_radius >= major_radius {
+            return Err(invalid(format!(
+                "a torus's minor radius must be smaller than its major radius, got {minor_radius} \
+                 and {major_radius}: a tube that wide crosses itself at the axis"
+            )));
+        }
         let mut make = ffi::b_rep_prim_api::BRepPrimAPI_MakeTorus_new(
             &*axis2(DVec3::ZERO, DVec3::Z)?,
             major_radius,
@@ -649,7 +657,10 @@ impl Shape {
         let faces = face.faces();
         match faces.len() {
             1 => faces.get(0),
-            _ => Ok(face),
+            n => Err(invalid(format!(
+                "the holes leave {n} faces rather than one: each hole must lie inside the outline, \
+                 without touching it or another hole"
+            ))),
         }
     }
 
@@ -679,53 +690,72 @@ impl Shape {
     /// arguments unmodified.
     ///
     /// A boolean can succeed and still return a wrong shape, which later operations then mangle
-    /// or drop without an error. Two kinds are recorded as notes (see
-    /// [`take_notes`](crate::take_notes)): an invalid result of a boolean that raised warnings (a
-    /// healthy one raises none), and a result whose volume shows the boolean went wrong (see
-    /// [`volume_problem`](Self::volume_problem)). The checks only add notes: one that can't run
-    /// leaves the result as it is.
+    /// or drop without an error. So its result is checked, and the boolean fails when the result
+    /// is invalid, or when its volume shows the boolean went wrong (see
+    /// [`volume_problem`](Self::volume_problem)). It fails too when the check can't be made:
+    /// no result is returned unchecked.
     fn boolean(&self, other: &Shape, name: &'static str, run: BooleanFn) -> Result<UniquePtr<Raw>> {
         let mut warnings = String::new();
         let result = run(self.raw(), other.raw(), &progress(), &mut warnings)?;
         if result.is_null() {
             return Err(failed(name));
         }
-        if !warnings.is_empty() && !valid(&result) {
-            crate::notes::note(invalid_boolean(name, &warnings));
-        } else {
-            match self.volume_problem(other, name, &result) {
-                Ok(Some(problem)) => crate::notes::note(problem),
-                Err(Error::Cancelled) => return Err(Error::Cancelled),
-                Ok(None) | Err(_) => {},
-            }
+        if !valid(&result) {
+            let inputs_valid = self.is_valid() && other.is_valid();
+            return Err(invalid(invalid_boolean(name, &warnings, inputs_valid)));
         }
-        Ok(result)
+        match self.volume_problem(other, name, &result) {
+            Ok(None) => Ok(result),
+            Ok(Some(problem)) => Err(invalid(problem)),
+            Err(Error::Cancelled) => Err(Error::Cancelled),
+            Err(e) => Err(invalid(format!(
+                "the {name} could not be checked, so its result is not used: {e}. That usually \
+                 comes from faces that graze or nearly coincide, such as a tool whose edge runs \
+                 along a bore of the same radius: make the tool overlap the faces it meets \
+                 clearly, by a few hundredths of a millimetre or more"
+            ))),
+        }
     }
 
     /// What is wrong with a boolean's result whose volume no correct result could have: a fuse
     /// smaller than one of the solids it fused, or a cut or common larger than the solids it was
     /// cut from. OpenCASCADE returns such results without an error or a warning where faces graze
     /// or nearly coincide (a lofted thread ridge running out past the end of its core lost the
-    /// core's volume to it). The volumes come first from integrating the solids directly, which is
-    /// fast and usually within a percent or so, but can be far off on long B-spline lofts (30% on
-    /// a 42-turn thread groove). A volume that looks impossible is measured again exactly, and
-    /// noted only if it still is.
+    /// core's volume to it).
+    ///
+    /// The result's volume, and the bound it is held to, are measured exactly (see
+    /// [`volume`](Self::volume)): a fuse is held to the solid that looks largest, a cut to the
+    /// shape it was cut from, a common to the side that looks smaller. Any solid's exact volume
+    /// bounds a fuse, and either side's a common, so integrating the solids directly, which is
+    /// fast but can be off by percent on long lofts, only picks which to measure exactly.
     fn volume_problem(&self, other: &Shape, name: &str, result: &Raw) -> Result<Option<String>> {
-        let volumes = |shape: &Shape| -> Result<Vec<f64>> {
-            shape.solids().iter().map(|s| Ok(s.volume_props()?.Mass().abs())).collect()
-        };
-        let (a, b) = (volumes(self)?, volumes(other)?);
+        let (a, b) = (self.solids(), other.solids());
         if a.is_empty() || b.is_empty() || name == "section" {
             return Ok(None);
         }
-        let result = Self::from_raw(result)?;
-        let got = result.volume_props()?.Mass().abs();
-        if let Some(problem) = impossible_volume(name, got, &a, &b) {
-            // Where the shapes can't be measured exactly, the direct integration stands.
-            let confirmed = self.exact_volume_problem(other, name, &result);
-            if let Some(problem) = confirmed.unwrap_or(Some(problem)) {
-                return Ok(Some(problem));
-            }
+        let rough = |solids: &Selection| -> Result<Vec<f64>> {
+            solids.iter().map(|s| Ok(s.volume_props()?.Mass().abs())).collect()
+        };
+        let (rough_a, rough_b) = (rough(&a)?, rough(&b)?);
+        let exact = |solids: &Selection| -> Result<f64> { solids.iter().map(Shape::volume).sum() };
+        // As the boolean returns it, so that measuring the shape again finds its split kept.
+        let result = Self::from_algorithm(result)?;
+        let got = result.volume()?;
+        let (sum_a, sum_b) = (rough_a.iter().sum::<f64>(), rough_b.iter().sum::<f64>());
+        let bound = match name {
+            "fuse" => {
+                let solids = a.iter().zip(&rough_a).chain(b.iter().zip(&rough_b));
+                match solids.max_by(|x, y| x.1.total_cmp(y.1)) {
+                    Some((largest, _)) => largest.volume()?,
+                    None => return Ok(None),
+                }
+            },
+            "cut" => exact(&a)?,
+            _ if sum_a <= sum_b => exact(&a)?,
+            _ => exact(&b)?,
+        };
+        if let Some(problem) = impossible_volume(name, got, bound) {
+            return Ok(Some(problem));
         }
         // OpenCASCADE can also miss that two solids meet at all, and then fuse them into a
         // compound of the two overlapping solids, cut nothing, or find nothing in common. Where a
@@ -734,21 +764,22 @@ impl Shape {
         // A cut that missed can still split faces along where the shapes meet, which moves the
         // integrated volume by a few parts in 1e8 (a helical groove cut from a cylinder), so
         // "removed nothing" means less than a millionth of the smaller side.
-        let (sum_a, sum_b) = (a.iter().sum::<f64>(), b.iter().sum::<f64>());
         let untouched = match name {
             "fuse" => result.solids().len() == a.len() + b.len(),
-            "cut" => (got - sum_a).abs() <= 1e-6 * sum_a.min(sum_b),
+            // The bound is the exact volume of the shape cut from.
+            "cut" => (got - bound).abs() <= 1e-6 * bound.min(sum_b),
             _ => result.solids().is_empty(),
         };
         // A cut can also go the other way and remove everything, although part of the shape lies
         // outside the tool: a point on its edges strictly outside the tool proves that.
         if name == "cut" && result.solids().is_empty() && self.reaches_outside(other)? {
-            return Ok(Some(format!(
+            return Ok(Some(
                 "the cut removed everything, although part of the shape lies outside what it was \
                  cut by: OpenCASCADE's boolean went wrong, which happens where faces graze or \
                  nearly coincide. Make the tool clearly smaller or clearly larger than the shape \
-                 where their faces meet ({sum_a:.6} and {sum_b:.6} of volume)"
-            )));
+                 where their faces meet"
+                    .into(),
+            ));
         }
         if untouched && (self.reaches_into(other)? || other.reaches_into(self)?) {
             let missed = match name {
@@ -760,27 +791,10 @@ impl Shape {
                 "the {name} {missed}, although the shapes overlap (an edge of one passes inside the \
                  other): OpenCASCADE's boolean missed where they meet, which happens where faces \
                  graze or nearly coincide. Make the shapes overlap clearly, and make tools run \
-                 past the ends of what they join or cut rather than ending inside or flush with it \
-                 ({:.6} and {:.6} of volume)",
-                sum_a, sum_b
+                 past the ends of what they join or cut rather than ending inside or flush with it"
             )));
         }
         Ok(None)
-    }
-
-    /// [`impossible_volume`] of a boolean `name` of this shape and `other` that gave `result`,
-    /// measured exactly.
-    fn exact_volume_problem(
-        &self,
-        other: &Shape,
-        name: &str,
-        result: &Shape,
-    ) -> Result<Option<String>> {
-        let exact = |shape: &Shape| -> Result<Vec<f64>> {
-            shape.solids().iter().map(Shape::volume).collect()
-        };
-        let got = result.volume()?;
-        Ok(impossible_volume(name, got, &exact(self)?, &exact(other)?))
     }
 
     /// Whether a point of this shape's edges lies strictly outside all of `other`'s solids, which
@@ -812,9 +826,7 @@ impl Shape {
     fn reaches_into(&self, other: &Shape) -> Result<bool> {
         let mut targets = vec![];
         for solid in other.solids().iter() {
-            if let Ok(bounds) = solid.bounding_box() {
-                targets.push((solid.clone(), bounds));
-            }
+            targets.push((solid.clone(), solid.bounding_box()?));
         }
         for p in self.edge_samples()? {
             for (solid, bounds) in &targets {
@@ -1007,104 +1019,60 @@ impl Shape {
                 if !make.IsDone() {
                     return Err(Error::OperationFailed("sweep"));
                 }
-                Self::from_algorithm(make.pin_mut().Shape()?)
+                let swept = Self::from_algorithm(make.pin_mut().Shape()?)?;
+                if !swept.is_valid() {
+                    return Err(invalid(
+                        "sweep failed: the swept shape is invalid, which OpenCASCADE's checker \
+                         rejects",
+                    ));
+                }
+                Ok(swept)
             },
         }
     }
 
-    /// Sweeps the wire `profile` along `spine`, into a solid if `solid`. The profile keeps square
-    /// to the path by OpenCASCADE's corrected Frenet frame, which also follows straight runs; where
-    /// that fails or gives an invalid shape (it does on helices whose pitch changes, which
-    /// `BRepOffsetAPI_MakePipe` even crashed on), by the plain Frenet frame, which follows curves
-    /// faithfully but is undefined on straight runs. Sharp corners in the path are mitred.
-    /// `BRepOffsetAPI_MakePipe` is the last resort. A cancel ends the retries.
+    /// Sweeps the wire `profile` along `spine`, into a solid if `solid`, with OpenCASCADE's pipe
+    /// shell. The profile keeps square to the path by the corrected Frenet frame, which also
+    /// follows straight runs, and sharp corners in the path are mitred. Where that fails, or
+    /// gives an invalid shape, the sweep fails: no other method is tried, as each would turn
+    /// the profile along the path differently.
     fn pipe(spine: &Shape, profile: &Shape, solid: bool) -> Result<Self> {
-        let attempt = |frenet: bool| -> Result<Self> {
-            let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakePipeShell_new(spine.wire()?)?;
-            make.pin_mut().SetMode(frenet);
-            ffi::b_rep_offset_api::BRepOffsetAPI_MakePipeShell_SetRightCorners(make.pin_mut());
-            make.pin_mut().Add(profile.raw(), false, false)?;
-            make.pin_mut().Build(&progress())?;
-            if !make.IsDone() || (solid && !make.pin_mut().MakeSolid()?) {
-                return Err(Error::OperationFailed("sweep"));
-            }
-            let swept = Self::from_algorithm(make.pin_mut().Shape()?)?;
-            if !swept.is_valid() {
-                return Err(Error::OperationFailed("sweep"));
-            }
-            Ok(swept)
-        };
-        let shell = or_retry(attempt(false), || attempt(true));
-        or_retry(shell, || {
-            // Some paths that turn a corner into an arc only BRepOffsetAPI_MakePipe follows; its
-            // result is only taken when valid and not partly inside out, as it can be garbage
-            // (or crash) where the above worked.
-            let profile = if solid { Self::face_from(profile)? } else { profile.clone() };
-            let mut make =
-                ffi::b_rep_offset_api::BRepOffsetAPI_MakePipe_new(spine.wire()?, profile.raw())?;
-            let swept = match make.IsDone() {
-                true => Self::from_algorithm(make.pin_mut().Shape()?).ok().filter(Shape::is_valid),
-                false => None,
-            }
-            .ok_or_else(|| {
-                invalid(
-                    "sweep failed: OpenCASCADE could not move the profile along this path. Start \
-                     the profile on the path's first point, square to it, and keep it smaller \
-                     than the path's tightest bend",
-                )
-            })?;
-            if let Some(problem) = swept.inside_out_sweep(&profile)? {
-                return Err(invalid(format!(
-                    "sweep failed: the result came out partly inside out ({problem}), although \
-                     OpenCASCADE's checker passes it. It does that along paths that cross \
-                     themselves, or with a profile that isn't square to the path at its start. \
-                     Sweep along a smooth path, wire([spline(points)]), that doesn't cross \
-                     itself, with the profile on its first point and square to it: \
-                     circle(points[0], path.edges()[0].tangent_at(0), r)"
-                )));
-            }
-            Ok(swept)
-        })
-    }
-
-    /// What shows that this sweep of the face `profile` is partly inside out, if anything.
-    /// `BRepOffsetAPI_MakePipe` returns such solids without an error, and OpenCASCADE's checker
-    /// passes them, but their pieces' volumes cancel: the center of mass lands outside the
-    /// bounding box, where no solid's can lie, or the volume comes out far below what the swept
-    /// sides imply. Those hold the profile's perimeter along the path, as the volume holds its
-    /// area, so the volume is about the sides' area times the profile's area over its perimeter.
-    fn inside_out_sweep(&self, profile: &Shape) -> Result<Option<String>> {
-        if !profile.is(ShapeType::Face) || self.solids().is_empty() {
-            return Ok(None);
+        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakePipeShell_new(spine.wire()?)?;
+        make.pin_mut().SetMode(false);
+        ffi::b_rep_offset_api::BRepOffsetAPI_MakePipeShell_SetRightCorners(make.pin_mut());
+        make.pin_mut().Add(profile.raw(), false, false)?;
+        let built = make.pin_mut().Build(&progress()).is_ok()
+            && make.IsDone()
+            && (!solid || make.pin_mut().MakeSolid().unwrap_or(false));
+        if !built {
+            crate::cancel::check()?;
+            return Err(invalid(
+                "sweep failed: OpenCASCADE could not move the profile along this path while \
+                 keeping it square to the path. Start the profile on the path's first point, \
+                 square to it, and keep it smaller than the path's tightest bend. It also fails \
+                 along some long helices whose pitch changes: use a constant pitch, or fewer turns",
+            ));
         }
-        let props = self.volume_props()?;
-        let volume = props.Mass().abs();
-        let center = from_pnt(&ffi::g_prop::GProp_GProps_CentreOfMass(&props));
-        let bounds = self.bounding_box()?;
-        let pad = DVec3::splat(1e-6 * (bounds.max - bounds.min).length());
-        let inside = BoundingBox { min: bounds.min - pad, max: bounds.max + pad }.contains(center);
-        let (area, perimeter) = (profile.surface_props()?.Mass(), profile.linear_props()?.Mass());
-        let sides = self.surface_props()?.Mass() - 2.0 * area;
-        let expected = area / perimeter * sides;
-        if inside && volume >= 0.1 * expected {
-            return Ok(None);
+        let swept = Self::from_algorithm(make.pin_mut().Shape()?)?;
+        if !swept.is_valid() {
+            return Err(invalid(
+                "sweep failed: the swept shape is invalid, which OpenCASCADE's checker rejects. \
+                 That happens where the profile is wider than a bend in the path, where the path \
+                 crosses itself, or where the profile isn't square to the path at its start. \
+                 Sweep along a smooth path, wire([spline(points)]), that doesn't cross itself, \
+                 with the profile on its first point and square to it: circle(points[0], \
+                 path.edges()[0].tangent_at(0), r)",
+            ));
         }
-        Ok(Some(format!(
-            "it holds {volume:.6} of volume where its sides imply about {expected:.6}, and its \
-             center of mass, {}, lies {} its bounding box",
-            fmt_vec(center),
-            if inside { "inside" } else { "outside" }
-        )))
+        Ok(swept)
     }
 
     /// A smooth shape passing through all sections (wires, or faces whose outer wire is used).
     ///
     /// Through three or more sections it can swing past them, the more so the more unevenly
-    /// they are spaced. OpenCASCADE spaces the sections along the loft by the distances between
-    /// them, which lofted circles of radius 12 to 16 at x = 0, 90, 172 and 180 to a radius
-    /// between 4.3 and 21.4; by the square roots of the distances (centripetally), as here when
-    /// one gap between sections is more than twice another, the same loft stays between 10.1
-    /// and 16.3. [`ruled_loft`](Self::ruled_loft) stays between its sections.
+    /// they are spaced: circles of radius 12 to 16 at x = 0, 60, 120 and 180 loft to a radius
+    /// between 11.6 and 15.9, but at x = 0, 90, 172 and 180 to one between 4.3 and 21.4. Space
+    /// sections evenly, or use [`ruled_loft`](Self::ruled_loft), which stays between them.
     pub fn loft(sections: &[Shape], solid: bool) -> Result<Self> {
         Self::loft_through(sections, solid, false)
     }
@@ -1130,39 +1098,37 @@ impl Shape {
                 _ => Ok(section.clone()),
             })
             .collect::<Result<Vec<_>>>()?;
-        // Where the gaps between sections differ a lot, space them centripetally (see `loft`).
-        // Evenly spaced sections, such as a thread's, keep OpenCASCADE's spacing: the other
-        // changes the surfaces a little there too, enough to make a cut through a slot that
-        // grazes a bore miss.
-        let centers = wires
-            .iter()
-            .map(|wire| wire.bounding_box().map(|b| (b.min + b.max) / 2.0))
-            .collect::<Result<Vec<_>>>()?;
-        let gaps: Vec<f64> = centers.windows(2).map(|pair| pair[0].distance(pair[1])).collect();
-        let narrowest = gaps.iter().copied().fold(f64::INFINITY, f64::min);
-        let uneven = gaps.iter().any(|gap| *gap > 2.0 * narrowest);
-        // OpenCASCADE first makes the sections compatible, matching up their vertices so sections
-        // with different numbers of edges loft; that step fails on long runs of circles (more than
-        // two turns of a helix), which loft fine without it.
-        let attempt = |compatible: bool| -> Result<Self> {
-            let mut make =
-                ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new_ruled(solid, ruled);
-            if uneven {
-                make.pin_mut().SetParType(
-                    ffi::b_rep_offset_api::Approx_ParametrizationType::Approx_Centripetal,
-                );
-            }
-            make.pin_mut().CheckCompatibility(compatible);
-            for wire in &wires {
-                make.pin_mut().AddWire(wire.wire()?)?;
-            }
-            make.pin_mut().Build(&progress())?;
-            if !make.IsDone() {
-                return Err(failed("loft"));
-            }
-            Self::from_algorithm(make.pin_mut().Shape()?)
-        };
-        or_retry(attempt(true), || attempt(false))
+        // OpenCASCADE matches up the sections' vertices first, so that sections with different
+        // numbers of edges loft and the loft doesn't twist. Sections that are each one closed
+        // edge, such as circles, have no vertices to match but their start points, so they are
+        // joined start to start: matching them changes nothing where it works, and it fails on
+        // circles around more than a few turns of a helix. (circle() starts circles along a path
+        // on the same side; see `circle_edge`.)
+        let single = wires.iter().all(|w| w.is_closed() && w.edges().len() == 1);
+        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new_ruled(solid, ruled);
+        make.pin_mut().CheckCompatibility(!single);
+        for wire in &wires {
+            make.pin_mut().AddWire(wire.wire()?)?;
+        }
+        let built = make.pin_mut().Build(&progress()).is_ok() && make.IsDone();
+        if !built {
+            crate::cancel::check()?;
+            return Err(invalid(
+                "loft failed: OpenCASCADE could not join these sections. Make every section a \
+                 closed wire (or every one open), with none crossing another; circles along a \
+                 path are best made with circle(center, normal, r), which starts each on the same \
+                 side",
+            ));
+        }
+        let lofted = Self::from_algorithm(make.pin_mut().Shape()?)?;
+        if !lofted.is_valid() {
+            return Err(invalid(
+                "loft failed: the lofted shape is invalid, which OpenCASCADE's checker rejects. \
+                 That happens where sections cross one another or the loft twists between them: \
+                 space the sections further apart, and make them run the same way round",
+            ));
+        }
+        Ok(lofted)
     }
 
     fn require_edges(&self, edges: &[Shape], what: &str) -> Result<()> {
@@ -1193,14 +1159,17 @@ impl Shape {
         })
     }
 
-    /// Runs a fillet or chamfer, retrying it once on a cleaned copy.
+    /// Runs a fillet or chamfer of the selected edges that are corners, once.
     ///
-    /// A boolean leaves the faces it glues together split along seams that are no real corner,
-    /// such as where a fused boss's top meets the plate's top in one plane. Selectors like `">Z"`
-    /// pick those seams up with the real edges, and OpenCASCADE cannot round an edge between two
-    /// faces that continue each other, so the whole fillet fails. When the first try fails and
-    /// [`clean`](Self::clean) removes edges, each selected edge is found again on the cleaned
-    /// shape by its midpoint: the seams have none to land on and drop out.
+    /// Selected edges that are no corner are left out, as there is nothing there to round and
+    /// OpenCASCADE fails the whole operation on one: a seam, where a closed surface such as a
+    /// cylinder meets itself (the seam of a horizontal cylinder can be its highest edge), and an
+    /// edge between faces that continue each other. Selectors like `">Z"` pick both up.
+    ///
+    /// Among the second kind are the edges a boolean leaves where it fuses faces that continue
+    /// each other, such as a boss's top flush with a plate's. OpenCASCADE can't round the edges
+    /// that meet those either, and [`clean`](Self::clean) merges the faces; but it renumbers the
+    /// shape's edges and faces, so the fillet does not clean on its own: it fails, saying to.
     fn blend(
         &self,
         kind: Blend,
@@ -1208,88 +1177,69 @@ impl Shape {
         edges: &[Shape],
         build: impl Fn(&Shape, &[Shape]) -> Result<Shape>,
     ) -> Result<Self> {
-        // A seam, where a closed surface such as a cylinder meets itself, is no corner, and
-        // OpenCASCADE fails the whole operation on one. Selectors pick them up: the seam of a
-        // horizontal cylinder can be the highest edge.
-        let faces = self.faces();
+        let faces: Vec<(Shape, Selection)> =
+            self.faces().iter().map(|face| (face.clone(), face.edges())).collect();
         let mut corners = Vec::with_capacity(edges.len());
         for edge in edges {
-            let mut seam = false;
-            for face in faces.iter() {
-                seam |= ffi::b_rep::BRep_Tool_IsClosed_on_face(edge.edge()?, face.face()?);
-            }
-            if !seam {
+            if Self::is_corner(edge, &faces)? {
                 corners.push(edge.clone());
             }
         }
         if corners.is_empty() {
             let (what, verb) = kind.words();
             return Err(Error::EmptySelection(format!(
-                "{what} needs at least one edge where two faces meet, but the selected edges are \
-                 all seams, where a closed surface such as a cylinder meets itself: there is no \
-                 corner there to {verb}. Select the edges between faces instead"
+                "{what} needs at least one edge where two faces meet at a corner, but the \
+                 selected edges are all seams, where a closed surface such as a cylinder meets \
+                 itself, or edges between faces that continue each other: there is no corner \
+                 there to {verb}. Select the edges between faces that meet at an angle instead"
             )));
         }
         let edges = &corners[..];
         // OpenCASCADE can also report success and return a broken solid, for instance for a
         // chamfer wider than a rounded corner beside it; booleans, meshes and exports of it then
-        // fail, or come out empty, far from the line that broke it. Such a result counts as a
-        // failure, unless the shape was broken already.
-        let checked = |shape: &Shape, edges: &[Shape]| -> Result<Shape> {
-            let blended = build(shape, edges)?;
-            if blended.is_valid() || !shape.is_valid() {
-                Ok(blended)
-            } else {
-                Err(blend_invalid(kind, size, edges.len()))
-            }
-        };
-        let error = match checked(self, edges) {
-            Ok(shape) => return Ok(shape),
+        // fail, or come out empty, far from the line that broke it.
+        let error = match build(self, edges) {
+            Ok(blended) if blended.is_valid() => return Ok(blended),
+            Ok(_) => blend_invalid(kind, size, edges.len(), self.is_valid()),
             Err(Error::Cancelled) => return Err(Error::Cancelled),
-            Err(error) => error,
+            Err(_) => blend_failed(kind, size, edges.len()),
         };
-        let retried = self.clean().and_then(|cleaned| {
-            if cleaned.edges().len() >= self.edges().len() {
-                return Err(error.clone());
+        // Faces that clean() would merge are faces a boolean split.
+        if self.clean()?.faces().len() < self.faces().len() {
+            return Err(invalid(format!("{}. {}", error, blend_split(kind, size))));
+        }
+        Err(invalid(error))
+    }
+
+    /// Whether `edge` is a corner between the faces it bounds, given each face with its edges:
+    /// not a seam, and between faces that don't continue each other.
+    fn is_corner(edge: &Shape, faces: &[(Shape, Selection)]) -> Result<bool> {
+        let mut sides = Vec::with_capacity(2);
+        for (face, face_edges) in faces {
+            if ffi::b_rep::BRep_Tool_IsClosed_on_face(edge.edge()?, face.face()?) {
+                return Ok(false);
             }
-            let found = cleaned.edges_through(edges)?;
-            if found.is_empty() {
-                return Err(error.clone());
+            if face_edges.iter().any(|e| e.is_same(edge)) {
+                sides.push(face);
             }
-            checked(&cleaned, &found)
-        });
-        match retried {
-            Ok(shape) => Ok(shape),
-            Err(Error::Cancelled) => Err(Error::Cancelled),
-            Err(_) if error == blend_invalid(kind, size, edges.len()) => Err(error),
-            Err(_) => Err(blend_failed(kind, size, edges.len())),
+        }
+        match sides[..] {
+            [a, b] => Ok(!Self::continue_each_other(a, b, edge)?),
+            _ => Ok(true),
         }
     }
 
-    /// The edges of this shape that pass through the midpoints of `edges`, without repeats.
-    fn edges_through(&self, edges: &[Shape]) -> Result<Vec<Shape>> {
-        let mut candidates = Vec::new();
-        for edge in self.edges().shapes() {
-            if let Ok(bounds) = edge.bounding_box() {
-                candidates.push((edge.clone(), bounds));
+    /// Whether the faces `a` and `b` on either side of `edge` continue each other across it,
+    /// with no corner: their outward normals agree along it (at a quarter, half and three
+    /// quarters of its length) to within a ten-thousandth of a degree.
+    fn continue_each_other(a: &Shape, b: &Shape, edge: &Shape) -> Result<bool> {
+        for t in [0.25, 0.5, 0.75] {
+            let p = edge.point_at(t)?;
+            if a.normal_near(p)?.dot(b.normal_near(p)?) < (1e-4f64).to_radians().cos() {
+                return Ok(false);
             }
         }
-        let mut found: Vec<Shape> = Vec::new();
-        for edge in edges {
-            let mid = edge.point_at(0.5)?;
-            let probe = Shape::vertex_at(mid)?;
-            let pad = DVec3::splat(1e-4);
-            for (candidate, bounds) in &candidates {
-                let near = BoundingBox { min: bounds.min - pad, max: bounds.max + pad };
-                if near.contains(mid)
-                    && probe.distance(candidate)? < 1e-5
-                    && !found.iter().any(|f| f.is_same(candidate))
-                {
-                    found.push(candidate.clone());
-                }
-            }
-        }
-        Ok(found)
+        Ok(true)
     }
 
     /// Rounds every edge.
@@ -1337,47 +1287,49 @@ impl Shape {
         }
         // Without open faces OCCT returns the offset solid itself; subtract to get the walls.
         let walls = if thickness < 0.0 { self.cut(&thick) } else { thick.cut(self) };
-        walls.map_err(|_| shell_failed(self, thickness))
+        walls.map_err(|e| match e {
+            Error::Cancelled => e,
+            e => invalid(format!("shell failed: subtracting the offset solid failed: {e}")),
+        })
     }
 
-    /// OpenCASCADE's thick solid (with `open_faces`) or offset solid (without). It can report
-    /// success and still return an invalid solid, or the input unchanged, notably where the wall
-    /// is at least as thick as a fillet it offsets inward: several settings are tried, starting
-    /// with CadQuery's, and only a valid result whose volume changed is taken.
+    /// OpenCASCADE's thick solid (with `open_faces`) or offset solid (without), with CadQuery's
+    /// settings: offset faces are intersected with all the others, not only their neighbours,
+    /// and outward corners are rounded. OpenCASCADE's defaults fail on rounded enclosures that
+    /// these shell. It can report success and still return an invalid solid, or the input
+    /// unchanged, notably where the wall is at least as thick as a fillet it offsets inward:
+    /// either is an error.
     fn thick_solid(&self, thickness: f64, open_faces: &[Shape]) -> Result<Self> {
-        let arc = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
-        let sharp = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Intersection;
         let mut faces = ffi::top_tools::new_list_of_shape();
         for face in open_faces {
             faces.pin_mut().Append(face.raw());
         }
-        let before = self.volume_props()?.Mass().abs();
-        for (join, intersection) in [(arc, true), (sharp, true), (arc, false)] {
-            let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakeThickSolid_new();
-            let built = make.pin_mut().MakeThickSolidByJoin(
-                self.raw(),
-                &faces,
-                thickness,
-                1e-3,
-                ffi::b_rep_offset_api::BRepOffset_Mode::BRepOffset_Skin,
-                intersection,
-                false,
-                join,
-                false,
-                &progress(),
-            );
-            // A cancelled attempt fails like any other: stop rather than try the next one.
-            crate::cancel::check()?;
-            if built.is_err() || !make.IsDone() {
-                continue;
-            }
-            let thick = Self::from_algorithm(make.pin_mut().Shape()?)?;
-            let after = thick.volume_props()?.Mass().abs();
-            if thick.is_valid() && (after - before).abs() > 1e-6 * before.max(1.0) {
-                return Ok(thick);
-            }
+        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_MakeThickSolid_new();
+        let built = make.pin_mut().MakeThickSolidByJoin(
+            self.raw(),
+            &faces,
+            thickness,
+            1e-3,
+            ffi::b_rep_offset_api::BRepOffset_Mode::BRepOffset_Skin,
+            true,
+            false,
+            ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc,
+            false,
+            &progress(),
+        );
+        crate::cancel::check()?;
+        if built.is_err() || !make.IsDone() {
+            return Err(shell_failed(self, thickness));
         }
-        Err(shell_failed(self, thickness))
+        let thick = Self::from_algorithm(make.pin_mut().Shape()?)?;
+        // Integrating directly, rather than exactly, is enough to tell the input returned
+        // unchanged: the same geometry integrates to the same number. (Offsetting free-form faces
+        // makes offset surfaces, which can't be measured exactly; see `for_measuring`.)
+        let (before, after) = (self.volume_props()?.Mass(), thick.volume_props()?.Mass());
+        if !thick.is_valid() || (after.abs() - before.abs()).abs() <= 1e-6 * before.abs() {
+            return Err(shell_failed(self, thickness));
+        }
+        Ok(thick)
     }
 
     /// Offsets a planar wire or face within its plane (positive grows it). A face keeps its
@@ -1405,36 +1357,20 @@ impl Shape {
             },
         }
         // OpenCASCADE offsets B-spline edges into an invalid outline where they bend more tightly
-        // than the offset, with no error. Approximating them by arcs and lines first offsets
-        // more of those cleanly, and fails on the rest.
-        let exact = self.offset_face(distance, false);
-        match exact {
-            Ok(ref face) if face.is_valid() => return exact,
-            Err(Error::InvalidArgument(_)) => return exact,
-            _ => {},
-        }
-        crate::cancel::check()?;
-        match self.offset_face(distance, true) {
-            Ok(face) if face.is_valid() => Ok(face),
-            Err(error @ Error::InvalidArgument(_)) => Err(error),
-            _ => Err(invalid(format!(
+        // than the offset, with no error: that is an error here.
+        let crossing = || {
+            invalid(format!(
                 "offset failed: an offset of {distance} of this outline comes out crossing itself, \
                  which happens where the outline bends more tightly than the offset (inward bends \
                  for a positive offset, outward ones for a negative). Offset by less, or make \
                  those bends wider"
-            ))),
-        }
-    }
-
-    /// The face's offset, approximating B-spline edges by arcs and lines if `approx`.
-    fn offset_face(&self, distance: f64, approx: bool) -> Result<Self> {
+            ))
+        };
         let join = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
         let mut make =
             ffi::b_rep_offset_api::BRepOffsetAPI_MakeOffset_face_new(self.face()?, join)?;
-        make.pin_mut().SetApprox(approx);
-        make.pin_mut().Perform(distance, 0.0)?;
-        if !make.IsDone() {
-            return Err(Error::OperationFailed("offset"));
+        if make.pin_mut().Perform(distance, 0.0).is_err() || !make.IsDone() {
+            return Err(crossing());
         }
         // One wire per boundary of the result: the largest bounds the face and the others are
         // its holes, unless the offset split the face, which leaves wires outside the largest.
@@ -1445,17 +1381,43 @@ impl Shape {
             .collect::<Result<Vec<_>>>()?;
         wires.sort_by(|a, b| b.0.total_cmp(&a.0));
         let Some(((outer_area, outer), holes)) = wires.split_first() else {
-            return Err(Error::OperationFailed("offset"));
+            return Err(crossing());
         };
         let hole_area: f64 = holes.iter().map(|(area, _)| area).sum();
         let holes: Vec<Self> = holes.iter().map(|(_, wire)| wire.clone()).collect();
-        let face = Self::face_with_holes(outer, &holes)?;
-        if (face.area()? - (outer_area - hole_area)).abs() > 1e-6 * outer_area {
-            return Err(invalid(format!(
+        let split = || {
+            invalid(format!(
                 "an offset of {distance} splits the shape into separate regions; shrink it by less"
-            )));
+            ))
+        };
+        let face = Self::face_with_holes(outer, &holes).map_err(|e| match e {
+            Error::Cancelled => e,
+            _ => split(),
+        })?;
+        if (face.area()? - (outer_area - hole_area)).abs() > 1e-6 * outer_area {
+            return Err(split());
+        }
+        if !face.is_valid()
+            || !face.lies_at(distance.abs(), &Self::compound(self.wires().shapes())?)?
+        {
+            return Err(crossing());
         }
         Ok(face)
+    }
+
+    /// Whether every edge of this shape lies `distance` from `other`, as an offset of it does: at
+    /// nine points along each, to within a millionth of the distance. An offset that crosses
+    /// itself, or meets the offset of another of the outline's boundaries, comes nearer.
+    fn lies_at(&self, distance: f64, other: &Shape) -> Result<bool> {
+        for edge in self.edges().iter() {
+            for k in 0..=8 {
+                let p = Self::vertex_at(edge.point_at(k as f64 / 8.0)?)?;
+                if (p.distance(other)? - distance).abs() > 1e-6 * distance.max(1.0) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
     }
 
     /// The closed outline `distance` around an open wire: a slot around a line, or a bent slot
@@ -1468,34 +1430,50 @@ impl Shape {
                  rather than polyline(points), or end a sketch with close()"
             )));
         }
+        // A straight line lies in many planes, so OpenCASCADE can't offset it: its slot is made
+        // here, in the horizontal plane, running counter-clockwise seen from above.
+        if let [line] = self.edges().shapes() {
+            if line.geom_type()? == "line" {
+                return Self::slot(line, distance);
+            }
+        }
+        let failed = || {
+            invalid(format!(
+                "offset failed: OpenCASCADE could not offset this open wire by {distance}. It \
+                 must lie in one plane (a straight wire of several edges lies in many: draw its \
+                 slot as a sketch on the plane you want), and not bend more tightly than the \
+                 offset"
+            ))
+        };
         let join = ffi::geom_abs::GeomAbs_JoinType::GeomAbs_Arc;
         let mut make =
             ffi::b_rep_offset_api::BRepOffsetAPI_MakeOffset_wire_new(self.wire()?, join)?;
-        if make.pin_mut().Perform(distance, 0.0).is_ok() && make.IsDone() {
-            let wires = Self::from_raw(make.pin_mut().Shape()?)?.wires();
-            if let [outline] = wires.shapes() {
-                if outline.is_closed() && Self::face_from(outline)?.is_valid() {
-                    return Ok(outline.clone());
-                }
-            }
+        if make.pin_mut().Perform(distance, 0.0).is_err() || !make.IsDone() {
+            return Err(failed());
         }
-        // A straight wire lies in many planes, so OpenCASCADE can't offset it: make the slot in
-        // the horizontal one, running counter-clockwise seen from above.
-        let unplaced = || {
-            invalid(
-                "offset failed: OpenCASCADE could not offset this open wire. It must lie in one \
-                 plane, and a straight one must be horizontal, as one that isn't lies in many \
-                 planes: draw its slot as a sketch on the plane you want instead",
-            )
-        };
-        let line = match self.edges().shapes() {
-            [edge] if edge.geom_type()? == "line" => edge.clone(),
-            _ => return Err(unplaced()),
-        };
+        let wires = Self::from_raw(make.pin_mut().Shape()?)?.wires();
+        match wires.shapes() {
+            [outline]
+                if outline.is_closed()
+                    && Self::face_from(outline)?.is_valid()
+                    && outline.lies_at(distance, self)? =>
+            {
+                Ok(outline.clone())
+            },
+            _ => Err(failed()),
+        }
+    }
+
+    /// The slot `distance` around a horizontal straight edge, in the horizontal plane.
+    fn slot(line: &Shape, distance: f64) -> Result<Self> {
         let (start, end) = (line.start_point()?, line.end_point()?);
         let along = end - start;
         if along.z.abs() > EPSILON * along.length().max(1.0) {
-            return Err(unplaced());
+            return Err(invalid(
+                "offset failed: a straight line that isn't horizontal lies in many planes, so \
+                 the slot around it could lie in any of them: draw its slot as a sketch on the \
+                 plane you want instead",
+            ));
         }
         let ahead = along.normalize() * distance;
         let left = DVec3::Z.cross(ahead);
@@ -1589,17 +1567,18 @@ impl Shape {
         self.props(|s, p| ffi::b_rep_g_prop::BRepGProp::LinearProperties(s, p, true, false))
     }
 
-    /// The shape to measure, and whether measuring it is exact: itself when all its geometry is
-    /// analytic (lines, conics, planes, cylinders, cones, spheres and tori), and otherwise a copy
-    /// split into Bézier pieces, one per span of every B-spline curve and surface. OpenCASCADE
-    /// integrates each face at a fixed number of Gauss points: exact for analytic faces, but off
-    /// by percent on lofts, sweeps and extruded splines, whose faces have many spans. On a single
-    /// Bézier patch the same integration is accurate, to about 1e-7. (Its adaptive integrations
-    /// report a tiny error on such faces while getting them wrong, and can take minutes.) Closed
-    /// faces, such as a torus, are cut open first: splitting the edges of a face that wraps
-    /// around corrupts its boundary. If the split fails, the shape itself is returned with
-    /// `false`, to be measured approximately rather than not at all.
-    fn for_measuring(&self) -> Result<(Self, bool)> {
+    /// The shape to measure exactly: itself when all its geometry is analytic (lines, conics,
+    /// planes, cylinders, cones, spheres and tori), and otherwise a copy split into Bézier pieces,
+    /// one per span of every B-spline curve and surface. OpenCASCADE integrates each face at a
+    /// fixed number of Gauss points: exact for analytic faces, but off by percent on lofts, sweeps
+    /// and extruded splines, whose faces have many spans. On a single Bézier patch the same
+    /// integration is accurate, to about 1e-7. (Its adaptive integrations report a tiny error on
+    /// such faces while getting them wrong, and can take minutes.) Closed faces, such as a torus,
+    /// are cut open first: splitting the edges of a face that wraps around corrupts its boundary.
+    ///
+    /// Fails, rather than measure approximately, when the split fails, or leaves a face whose
+    /// surface isn't smooth throughout.
+    fn for_measuring(&self) -> Result<Self> {
         let free_form = |s: &Shape| {
             // Degenerate edges, at the poles of a sphere, have no curve and need nothing.
             matches!(
@@ -1608,34 +1587,78 @@ impl Shape {
             )
         };
         if !self.faces().iter().any(free_form) && !self.edges().iter().any(free_form) {
-            return Ok((self.clone(), true));
+            return Ok(self.clone());
         }
+        // Splitting takes most of the time, and the same shape is often measured more than once,
+        // as a boolean's result and then the script's: the last few splits are kept. A shape
+        // never changes, so its split stays right.
+        let cached = SPLITS.with_borrow(|splits| {
+            splits.iter().find(|(shape, _)| shape.is_same(self)).map(|(_, split)| split.clone())
+        });
+        if let Some(split) = cached {
+            return Ok(split);
+        }
+        let split = self.split_for_measuring()?;
+        SPLITS.with_borrow_mut(|splits| {
+            if splits.len() == KEPT_SPLITS {
+                splits.remove(0);
+            }
+            splits.push((self.clone(), split.clone()));
+        });
+        Ok(split)
+    }
+
+    /// The Bézier split [`for_measuring`](Self::for_measuring) measures, checked.
+    fn split_for_measuring(&self) -> Result<Self> {
         // The conversion works on a copy, so a failure leaves this shape as it was.
-        match ffi::shape_upgrade::ShapeUpgrade_convert_to_bezier(self.raw()) {
-            Ok(split) => Ok((Self::from_unique(split)?, true)),
-            Err(_) => Ok((self.clone(), false)),
+        let split =
+            ffi::shape_upgrade::ShapeUpgrade_convert_to_bezier(self.raw()).map_err(|e| {
+                invalid(format!(
+                "the shape can't be measured exactly: OpenCASCADE could not split its B-spline \
+                 faces into Bézier patches ({})",
+                e.what()
+            ))
+            })?;
+        let split = Self::from_unique(split)?;
+        // Integrating at fixed points is accurate on a face only where its surface is smooth
+        // throughout. The split cuts offset surfaces, which shelling free-form faces makes, at
+        // their base surface's knots, but can't turn them into Bézier patches.
+        let mut rough = 0;
+        for face in split.faces().iter() {
+            let surface = ffi::b_rep_adaptor::BRepAdaptor_Surface_new(face.face()?, true)?;
+            if ffi::b_rep_adaptor::BRepAdaptor_Surface_smooth_patches(&surface)? != 1 {
+                rough += 1;
+            }
         }
+        if rough > 0 {
+            return Err(invalid(format!(
+                "the shape can't be measured exactly: {rough} of its faces could not be split into \
+                 pieces that are smooth throughout"
+            )));
+        }
+        Ok(split)
     }
 
-    /// The enclosed volume (0 for shapes without solids).
+    /// The enclosed volume (0 for shapes without solids), measured exactly (see
+    /// [`mass_properties`](Self::mass_properties)).
     pub fn volume(&self) -> Result<f64> {
-        Ok(self.for_measuring()?.0.volume_props()?.Mass().abs())
+        Ok(self.for_measuring()?.volume_props()?.Mass().abs())
     }
 
-    /// The total area of all faces.
+    /// The total area of all faces, measured exactly.
     pub fn area(&self) -> Result<f64> {
-        Ok(self.for_measuring()?.0.surface_props()?.Mass())
+        Ok(self.for_measuring()?.surface_props()?.Mass())
     }
 
     /// The volume, area and center of mass together, which splits the shape for measuring
-    /// once instead of three times.
+    /// once instead of three times. They are exact to about 1e-7, or an error: a shape whose
+    /// faces can't all be split into Bézier patches can't be measured.
     pub fn mass_properties(&self) -> Result<MassProperties> {
-        let (measured, exact) = self.for_measuring()?;
+        let measured = self.for_measuring()?;
         Ok(MassProperties {
             volume: measured.volume_props()?.Mass().abs(),
             area: measured.surface_props()?.Mass(),
             center: measured.center_of_mass()?,
-            exact,
         })
     }
 
@@ -1647,7 +1670,7 @@ impl Shape {
     /// The center of mass, using the highest-dimensional content of the shape: volume for
     /// solids, area for faces and shells, length for edges and wires.
     pub fn center(&self) -> Result<DVec3> {
-        self.for_measuring()?.0.center_of_mass()
+        self.for_measuring()?.center_of_mass()
     }
 
     fn center_of_mass(&self) -> Result<DVec3> {
@@ -1682,7 +1705,8 @@ impl Shape {
     /// parameters its boundary spans, which can reach well past the face: a tube cut square by a
     /// boolean keeps the box of the uncut tube. So the box starts from the edges and vertices,
     /// and grows by a curved face only as far as the face really reaches, found as its distance
-    /// to a plane just beyond it.
+    /// to a plane just beyond it. Fails where that distance can't be found, rather than return
+    /// a looser box.
     pub fn bounding_box(&self) -> Result<BoundingBox> {
         let loose = optimal_box(self.raw())?
             .ok_or_else(|| invalid("an empty shape has no bounding box"))?;
@@ -1700,16 +1724,16 @@ impl Shape {
             let bounds = tight.get_or_insert(reach);
             for axis in 0..3 {
                 if reach.max[axis] > bounds.max[axis] + slack {
-                    let extreme = face.extreme(axis, 1.0, &reach).unwrap_or(reach.max[axis]);
+                    let extreme = face.extreme(axis, 1.0, &reach)?;
                     bounds.max[axis] = bounds.max[axis].max(extreme.min(reach.max[axis]));
                 }
                 if reach.min[axis] < bounds.min[axis] - slack {
-                    let extreme = face.extreme(axis, -1.0, &reach).unwrap_or(reach.min[axis]);
+                    let extreme = face.extreme(axis, -1.0, &reach)?;
                     bounds.min[axis] = bounds.min[axis].min(extreme.max(reach.min[axis]));
                 }
             }
         }
-        Ok(tight.unwrap_or(loose))
+        tight.ok_or_else(|| invalid("an empty shape has no bounding box"))
     }
 
     /// How far this shape reaches along `axis` (0, 1 or 2 for X, Y or Z) in the direction of
@@ -1883,22 +1907,26 @@ impl Shape {
         if self.is(ShapeType::Wire) {
             return Self::face_from(self)?.normal();
         }
+        self.normal_near(self.center()?)
+    }
+
+    /// The outward unit normal of a face at the point of its surface nearest `p`.
+    fn normal_near(&self, p: DVec3) -> Result<DVec3> {
         let face = self.face()?;
-        let center = self.center()?;
         let surface = ffi::b_rep::BRep_Tool_Surface(face)?;
-        let projector = ffi::geom_api::GeomAPI_ProjectPointOnSurf_new(&point(center), &surface)?;
+        let projector = ffi::geom_api::GeomAPI_ProjectPointOnSurf_new(&point(p), &surface)?;
         let (mut u, mut v) = (0.0, 0.0);
-        if ffi::geom_api::GeomAPI_ProjectPointOnSurf_LowerDistanceParameters(
+        ffi::geom_api::GeomAPI_ProjectPointOnSurf_LowerDistanceParameters(
             &projector, &mut u, &mut v,
         )
-        .is_err()
-        {
-            // Projection can fail for degenerate surfaces; the middle of the face's parameter
-            // range is a reasonable fallback.
-            let adaptor = ffi::b_rep_adaptor::BRepAdaptor_Surface_new(face, true)?;
-            u = (adaptor.FirstUParameter() + adaptor.LastUParameter()) / 2.0;
-            v = (adaptor.FirstVParameter() + adaptor.LastVParameter()) / 2.0;
-        }
+        .map_err(|_| {
+            invalid(format!(
+                "cannot find the face's normal at {}: the point is as near to many points of its \
+                 surface as to any one (it lies on the axis of a full cylinder, or at the center \
+                 of a sphere, say), so there is no one normal there",
+                fmt_vec(p)
+            ))
+        })?;
         let props = ffi::b_rep_g_prop::BRepGProp_Face_new(face)?;
         let mut p = point(DVec3::ZERO);
         let mut n = vector(DVec3::ZERO);
@@ -1997,18 +2025,20 @@ fn valid(shape: &Raw) -> bool {
 }
 
 /// What is wrong with a boolean `name` ("fuse", "cut" or "common") that returned a volume of
-/// `got` from arguments whose solids have the volumes `a` and `b`, if no correct result could
-/// have that volume.
-fn impossible_volume(name: &str, got: f64, a: &[f64], b: &[f64]) -> Option<String> {
-    let largest = a.iter().chain(b).fold(0.0f64, |m, v| m.max(*v));
-    let (sum_a, sum_b) = (a.iter().sum::<f64>(), b.iter().sum::<f64>());
+/// `got`, if no correct result could have it: a fuse is at least `bound`, the volume of one of
+/// the solids it fused, and a cut or common at most `bound`, the volume of the shape it was cut
+/// from or of one side. The volumes are exact to about 1e-7, so a millionth is allowed for.
+fn impossible_volume(name: &str, got: f64, bound: f64) -> Option<String> {
+    const SLACK: f64 = 1e-6;
     let expected = match name {
-        "fuse" if got < 0.95 * largest => {
-            format!("at least {largest:.6}, the volume of the largest solid it fused")
+        "fuse" if got < (1.0 - SLACK) * bound => {
+            format!("at least {bound:.6}, the volume of one of the solids it fused")
         },
-        "cut" if got > 1.05 * sum_a => format!("at most {sum_a:.6}, the volume it cut from"),
-        "common" if got > 1.05 * sum_a.min(sum_b) => {
-            format!("at most {:.6}, the volume of the smaller side", sum_a.min(sum_b))
+        "cut" if got > (1.0 + SLACK) * bound => {
+            format!("at most {bound:.6}, the volume it cut from")
+        },
+        "common" if got > (1.0 + SLACK) * bound => {
+            format!("at most {bound:.6}, the volume of one side")
         },
         _ => return None,
     };
@@ -2020,11 +2050,13 @@ fn impossible_volume(name: &str, got: f64, a: &[f64], b: &[f64]) -> Option<Strin
     ))
 }
 
-/// The note for a boolean that returned an invalid shape, given the warnings it raised, such as
-/// "BOPAlgo_AlertAcquiredSelfIntersection,BOPAlgo_AlertTooSmallEdge".
-fn invalid_boolean(name: &str, warnings: &str) -> String {
+/// Why a boolean that returned an invalid shape failed, given the warnings it raised, such as
+/// "BOPAlgo_AlertAcquiredSelfIntersection,BOPAlgo_AlertTooSmallEdge", and whether the shapes it
+/// was given were valid.
+fn invalid_boolean(name: &str, warnings: &str, inputs_valid: bool) -> String {
     let words: Vec<String> = warnings
         .split(',')
+        .filter(|w| !w.is_empty())
         .map(|w| {
             let w = w.trim_start_matches("BOPAlgo_Alert");
             let mut out = String::new();
@@ -2037,11 +2069,20 @@ fn invalid_boolean(name: &str, warnings: &str) -> String {
             out
         })
         .collect();
+    let reported = match words.is_empty() {
+        true => String::new(),
+        false => format!(" (OpenCASCADE reported: {})", words.join(", ")),
+    };
+    if !inputs_valid {
+        return format!(
+            "the {name} returned an invalid shape{reported}: one of the shapes it was given was \
+             invalid already. Check each with is_valid() to find the operation that broke it"
+        );
+    }
     format!(
-        "the {name} returned an invalid shape (OpenCASCADE reported: {}), which later operations \
-         may mangle or silently drop. This usually comes from faces that only touch or nearly \
-         coincide: make the shapes overlap clearly, by a few hundredths of a millimetre or more",
-        words.join(", ")
+        "the {name} returned an invalid shape{reported}, which OpenCASCADE's checker rejects. \
+         This usually comes from faces that only touch or nearly coincide: make the shapes \
+         overlap clearly, by a few hundredths of a millimetre or more"
     )
 }
 
@@ -2081,25 +2122,44 @@ fn selected(edges: usize) -> String {
 }
 
 /// Why a fillet or chamfer that gave an invalid solid failed, and what to try instead.
-fn blend_invalid(kind: Blend, size: f64, edges: usize) -> Error {
+fn blend_invalid(kind: Blend, size: f64, edges: usize, input_valid: bool) -> String {
     let ((what, verb), measure, count) = (kind.words(), kind.measure(), selected(edges));
-    invalid(format!(
+    if !input_valid {
+        return format!(
+            "{what} failed: a {what} of {count} gave an invalid solid, as the shape it was given \
+             was invalid already. Check the shapes it was built from with is_valid() to find the \
+             operation that broke it"
+        );
+    }
+    format!(
         "{what} failed: a {what} of {count} with {measure} {size} gave an invalid solid, which \
          OpenCASCADE's checker rejects. Usually the {measure} is too large for a face next to one \
          of the edges, such as a chamfer wider than a rounded corner beside it. Try a smaller \
          {measure}, or {verb} fewer edges at a time"
-    ))
+    )
+}
+
+/// What to do when a fillet or chamfer fails on a shape whose faces a boolean split.
+fn blend_split(kind: Blend, size: f64) -> String {
+    let (what, verb) = kind.words();
+    format!(
+        "The shape's faces are also split along edges that are no corner, as a boolean leaves \
+         them where it fuses faces that continue each other (a boss's top flush with a plate's, \
+         say), and OpenCASCADE can't {verb} edges that meet those: merge the faces with clean() \
+         first, and select the edges on the cleaned shape, as clean() renumbers them: let part = \
+         part.clean(); part.{what}({size}, part.edges(\">Z\"))"
+    )
 }
 
 /// Why a fillet or chamfer failed, and what to try instead.
-fn blend_failed(kind: Blend, size: f64, edges: usize) -> Error {
+fn blend_failed(kind: Blend, size: f64, edges: usize) -> String {
     let ((what, verb), measure, count) = (kind.words(), kind.measure(), selected(edges));
-    invalid(format!(
+    format!(
         "{what} failed: OpenCASCADE could not {verb} {count} with {measure} {size}. Usually the \
          {measure} is too large for a face next to one of the edges, or an edge ends in a corner \
          the {what} can't close. Try a smaller {measure}, or {verb} fewer edges at a time (for \
          example the vertical edges first, then the top ones)"
-    ))
+    )
 }
 
 /// An exception from `operation`, or [`Error::Cancelled`] when it was asked to stop.
@@ -2126,10 +2186,6 @@ pub struct MassProperties {
     pub area: f64,
     /// The center of mass, as [`Shape::center`] finds it.
     pub center: DVec3,
-    /// Whether the three are exact (to about 1e-7). They are not when the shape's B-spline
-    /// geometry could not be split into Bézier patches: then they come from integrating it
-    /// directly, which can be off by a percent or so on lofts, sweeps and extruded splines.
-    pub exact: bool,
 }
 
 /// OpenCASCADE's optimal bounding box of a shape, or `None` for an empty one.
@@ -2158,6 +2214,17 @@ fn shell_failed(shape: &Shape, thickness: f64) -> Error {
          larger fillets, or shell first and fillet the outside edges afterwards"
     };
     invalid(format!("shell failed: OpenCASCADE could not offset the faces by {thickness}. {hint}"))
+}
+
+/// How many shapes' Bézier splits [`Shape::for_measuring`] keeps.
+const KEPT_SPLITS: usize = 4;
+
+thread_local! {
+    /// The shapes last split for measuring, with their splits, oldest first. Shapes never leave
+    /// their thread, so neither do these.
+    static SPLITS: std::cell::RefCell<Vec<(Shape, Shape)>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
 }
 
 /// An axis-aligned bounding box.
@@ -2194,15 +2261,25 @@ mod tests {
 
     #[test]
     fn impossible_boolean_volumes() {
-        assert_eq!(impossible_volume("fuse", 10.0, &[8.0], &[4.0]), None);
-        let fuse = impossible_volume("fuse", 7.0, &[8.0], &[4.0]).unwrap();
-        assert!(fuse.contains("a volume of 7.000000 where it must be at least 8.000000"), "{fuse}");
-        assert_eq!(impossible_volume("cut", 8.0, &[8.0], &[4.0]), None);
-        let cut = impossible_volume("cut", 9.0, &[8.0], &[4.0]).unwrap();
+        assert_eq!(impossible_volume("fuse", 8.0, 8.0), None);
+        let fuse = impossible_volume("fuse", 7.999, 8.0).unwrap();
+        assert!(fuse.contains("a volume of 7.999000 where it must be at least 8.000000"), "{fuse}");
+        assert_eq!(impossible_volume("cut", 8.0, 8.0), None);
+        let cut = impossible_volume("cut", 8.001, 8.0).unwrap();
         assert!(cut.contains("at most 8.000000, the volume it cut from"), "{cut}");
-        assert_eq!(impossible_volume("common", 4.1, &[8.0], &[2.0, 2.0]), None);
-        let common = impossible_volume("common", 5.0, &[8.0], &[2.0, 2.0]).unwrap();
-        assert!(common.contains("at most 4.000000, the volume of the smaller side"), "{common}");
+        assert_eq!(impossible_volume("common", 4.0, 4.0), None);
+        let common = impossible_volume("common", 4.001, 4.0).unwrap();
+        assert!(common.contains("at most 4.000000, the volume of one side"), "{common}");
+    }
+
+    #[test]
+    fn invalid_boolean_messages() {
+        let warned = "BOPAlgo_AlertAcquiredSelfIntersection,BOPAlgo_AlertTooSmallEdge";
+        let m = invalid_boolean("fuse", warned, true);
+        assert!(m.contains("(OpenCASCADE reported: acquired self intersection, too small edge)"));
+        assert!(m.contains("overlap clearly"), "{m}");
+        let m = invalid_boolean("cut", "", false);
+        assert!(m.starts_with("the cut returned an invalid shape: one of the shapes"), "{m}");
     }
     use ffi::geom_abs::{GeomAbs_CurveType as C, GeomAbs_SurfaceType as S};
 

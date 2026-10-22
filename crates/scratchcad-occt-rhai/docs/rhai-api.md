@@ -41,13 +41,13 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 |----------|--------|
 | `box(dx, dy, dz)`, `box_centered(dx, dy, dz)`, `box_from_corners(a, b)`, `cube(s)` | solid box |
 | `cylinder(r, h)`, `cylinder(base, axis, r, h)` | solid cylinder |
-| `sphere(r)`, `sphere(center, r)`, `cone(r1, r2, h)`, `torus(R, r)` | solids |
+| `sphere(r)`, `sphere(center, r)`, `cone(r1, r2, h)`, `torus(R, r)` | solids (a torus needs `r < R`) |
 | `vertex(p)`, `line(a, b)`, `arc(start, mid, end)` | vertex / edges |
 | `circle(r)`, `circle(plane, r)`, `circle(center, normal, r)` | closed wire; `circle(center, normal, r)` starts toward +Z when the normal is within 60° of horizontal, else toward +X, so lofts through circles along a path do not twist |
 | `rect(w, h)`, `rect(plane, w, h)` | closed wire, centered |
 | `polygon(points)`, `polygon(plane, points_2d)`, `polyline(points)` | closed / open wire |
 | `spline(points)`, `spline(points, closed)`, `bezier(points)` | edges |
-| `wire(edges)`, `face(wire)`, `face(outer, holes)`, `compound(shapes)` | assemblies |
+| `wire(edges)`, `face(wire)`, `face(outer, holes)`, `compound(shapes)` | assemblies (each hole must lie inside the outline: holes that would split the face are an error) |
 | `fuse_all(shapes)`, `loft(sections)`, `loft(sections, solid)`, `ruled_loft(sections)`, `ruled_loft(sections, solid)` | solids (a smooth loft can swing past unevenly spaced sections; a ruled one joins each to the next with straight lines) |
 | `sketch()`, `sketch(plane)` | a `Sketch` (see below) |
 | `vec3(x, y, z)`, `plane(name)`, `plane(origin, normal)`, `plane(origin, normal, x_dir)` | values |
@@ -58,18 +58,32 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 |----------|---------|
 | booleans | `fuse`/`union`/`+`, `cut`/`-`, `common`/`intersect`/`&`, `section`; a compound tool (`part - compound(holes)`) acts as its shapes together, even where they overlap |
 | transforms | `translate(v)`, `translate(x, y, z)`, `rotate(axis, deg)`, `rotate(origin, axis, deg)`, `rotate_x/y/z(deg)`, `scale(f)`, `scale(center, f)`, `mirror(plane_or_normal)`, `mirror(origin, normal)` |
-| features | `extrude(distance)` (along the face normal; see [Sketches](#sketches)), `extrude(vector)`, `revolve(axis, deg)`, `revolve(origin, axis, deg)`, `sweep(path)`, `fillet(r)`, `fillet(r, edges)`, `chamfer(d)`, `chamfer(d, edges)` (they leave out seam edges, where a closed surface such as a cylinder meets itself; one that fails is tried again on a `clean()` copy, without the seams booleans leave between faces in one plane), `shell(t)`, `shell(t, open_faces)`, `offset(d)` (2D; a face keeps its holes, and an open wire or edge grows into the outline around it, such as a slot around a line), `clean()`, `to_face()` |
+| features | `extrude(distance)` (along the face normal; see [Sketches](#sketches)), `extrude(vector)`, `revolve(axis, deg)`, `revolve(origin, axis, deg)`, `sweep(path)`, `fillet(r)`, `fillet(r, edges)`, `chamfer(d)`, `chamfer(d, edges)` (they leave out selected edges that are no corner: seams, where a closed surface such as a cylinder meets itself, and edges between faces that continue each other; where a boolean split faces like that, the error says to `clean()` the shape first and select its edges again), `shell(t)`, `shell(t, open_faces)`, `offset(d)` (2D; a face keeps its holes, and an open wire or edge grows into the outline around it, such as a slot around a line; a straight line must be horizontal), `clean()`, `to_face()` |
 | exploration | `faces()`, `edges()`, `vertices()`, `wires()`, `shells()`, `solids()`, `faces(sel)`, `edges(sel)`, `vertices(sel)`, `face(sel)`, `edge(sel)`, `vertex(sel)`, `top_face()`, `bottom_face()`, `children()` |
 | measurement | `volume()`, `area()`, `length()`, `center()`, `bounding_box()`, `distance(other)`, `closest_points(other)`, `contains(point)`, `classify(point)` (`"inside"`, `"outside"` or `"on"` the solids), `is_valid()`, `is_closed()`, `shape_type()`, `is_same(other)`, `==` |
 | edges, faces, vertices | `point()`, `start_point()`, `end_point()`, `point_at(t)`, `tangent_at(t)`, `radius()`, `geom_type()`, `normal()`, `plane()` (a sketch plane on a planar face), `outer_wire()` |
 | meshing | `mesh(tolerance)`, `mesh(tolerance, angle)` (angle in degrees, default 28.6); a `Mesh` has `vertices`, `normals`, `indices`, `vertex_count`, `triangle_count`, `area()` and `welded()` (shared vertices merged) |
 
-A fillet or chamfer whose result OpenCASCADE's checker rejects fails at its own line, suggesting
-a smaller size or fewer edges, rather than returning an invalid solid.
-A sweep that comes out partly inside out fails as well: OpenCASCADE returns such solids, which its
-checker passes, along paths that cross themselves, or with a profile that isn't square to the
-path. Sweep along a smooth path (`wire([spline(points)])`) with the profile on its first point,
-square to it.
+Each operation runs one method, and fails at its own line, saying what to change, where that
+method fails or gives a result OpenCASCADE's checker rejects: nothing falls back on another
+method, which would give a different shape, and nothing invalid is returned.
+
+* A boolean also fails where its result can't be right: a volume no correct result could have,
+  measured exactly, or a fuse, cut or common that missed where the shapes overlap. OpenCASCADE
+  returns such results without an error where faces graze or nearly coincide.
+* `sweep(path)` keeps the profile square to the path by OpenCASCADE's corrected Frenet frame and
+  mitres sharp corners. It fails along some long helices whose pitch changes, and where a
+  straight run turns sharply into an arc. Sweep along a smooth path (`wire([spline(points)])`)
+  with the profile on its first point, square to it.
+* `loft` matches up the sections' vertices first, except for sections that are each one closed
+  edge, such as circles, which are joined start to start: `circle(center, normal, r)` starts
+  circles along a path on the same side.
+* `shell` uses CadQuery's settings (offset faces intersected with all the others, rounded outer
+  corners), and fails where OpenCASCADE returns the solid unchanged.
+* `offset(d)` checks that every edge of the result lies `d` from the outline, so an offset that
+  crosses itself fails.
+* A fillet or chamfer that gives an invalid solid fails, suggesting a smaller size or fewer
+  edges.
 
 ## Selections and selectors
 
@@ -154,18 +168,22 @@ others, such as servers:
   conics, planes, cylinders, cones, spheres, tori). A shape with B-spline curves or surfaces
   (lofts, sweeps, splines) is measured on a copy split into Bézier patches, to about 1e-7 of
   the result; integrating its B-spline faces directly is off by percent. That split is the
-  slow part, so `shape.mass_properties()` returns all three from one split. The split works on a
-  deep copy, cutting closed faces open first, so measuring never changes the shape or the shapes it
-  shares geometry with. If it fails, the shape is integrated directly, and `MassProperties::exact`
-  is `false`.
-* **Notes.** A boolean can succeed and still return a wrong shape (where faces only touch or
-  nearly coincide), which later operations may mangle or drop without an error, leaving a final
-  shape that looks fine. Such booleans are recorded as notes, placed at their line in the script
-  when called from one: one that raised OpenCASCADE warnings and returned an invalid shape, and one
-  whose result has a volume no correct result could have, or that missed where the shapes meet (a
-  fuse that left overlapping solids separate, a cut that removed nothing or everything, a common
-  that found nothing). Take them after a script with `take_notes()`, to show them to whoever wrote
-  it. Notes are kept per thread.
+  slow part, so `shape.mass_properties()` returns all three from one split, and the last few
+  splits are kept, as a boolean measures its result and the script often measures it again. The
+  split works on a deep copy, cutting closed faces open first, so measuring never changes the
+  shape or the shapes it shares geometry with. Offset surfaces, which shelling lofted, swept or
+  spline faces makes, can't become Bézier patches, but are split where their base surface's knots
+  are, which integrates them as exactly. Where the split fails, or leaves a face that isn't smooth
+  throughout, measuring fails rather than integrate approximately; so does a boolean of such a
+  shape, whose result can't then be checked. `bounding_box()` bounds trimmed curved faces
+  tightly, and fails rather than return a looser box. `normal()` fails where a face's center is
+  as near many of its points as any one, as on the side of a full cylinder.
+* **Checked booleans.** A boolean can succeed and still return a wrong shape (where faces only
+  touch or nearly coincide), which later operations may mangle or drop without an error, leaving
+  a final shape that looks fine. So each boolean's result is checked, and the boolean fails with
+  `Error::InvalidArgument` where it is invalid, has a volume no correct result could have, or
+  missed where the shapes meet (a fuse that left overlapping solids separate, a cut that removed
+  nothing or everything, a common that found nothing).
 * **Console output.** OpenCASCADE prints to stdout. `set_message_handler(level, |level, text| ..)`
   receives its messages instead; `set_occt_messages(false)` sends only failures, to stderr.
 * **Threads.** `Shape` is neither `Send` nor `Sync`: OpenCASCADE shares sub-shapes between shapes

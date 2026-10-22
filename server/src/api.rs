@@ -172,9 +172,7 @@ impl ValidateRequest {
     pub(crate) fn run(self, ctx: &JobCtx) -> Result<Output, ApiError> {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
-        let (shape, shape_warnings) = measure::summarize(&c.shape, self.mass_properties)?;
-        let mut warnings = c.warnings;
-        warnings.extend(shape_warnings);
+        let (shape, warnings) = measure::summarize(&c.shape, self.mass_properties)?;
         let response = ValidateResponse {
             shape,
             output: c.output,
@@ -258,7 +256,7 @@ impl Raster2dRequest {
             self.center.map(DVec2::from_array),
             self.half_size,
         );
-        let mut warnings = c.warnings.clone();
+        let mut warnings = vec![];
         let pixel = 2.0 * view.half_size / f64::from(w.max(h));
         let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
         let segments = if bbox.min.z > 0.0 || bbox.max.z < 0.0 {
@@ -272,7 +270,7 @@ impl Raster2dRequest {
             ctx.set_stage(Stage::Meshing);
             let max_triangles = ctx.settings.max_mesh_triangles;
             let welded = mesh::mesh(&c.shape, tolerance, max_triangles)
-                .map_err(|e| explain_mesh_failure(e, &c))?
+                .map_err(|e| explain_mesh_failure(e, &c.shape))?
                 .welded();
             let segments = render::section(&welded);
             if segments.is_empty() {
@@ -369,9 +367,8 @@ impl Raster3dRequest {
         let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
         ctx.set_stage(Stage::Meshing);
         let max_triangles = ctx.settings.max_mesh_triangles;
-        let mut scene = scene(&c.shape, tolerance, max_triangles, self.edges)
-            .map_err(|e| explain_mesh_failure(e, &c))?;
-        scene.warnings.splice(0..0, c.warnings.iter().cloned());
+        let scene = scene(&c.shape, tolerance, max_triangles, self.edges)
+            .map_err(|e| explain_mesh_failure(e, &c.shape))?;
         ctx.set_stage(Stage::Rendering);
         let view = View3d {
             width: w,
@@ -392,24 +389,17 @@ impl Raster3dRequest {
     }
 }
 
-/// A failed mesh, saying when the shape fails OpenCASCADE's checker, which is the usual reason,
-/// and adding the notes the script's operations recorded, such as a boolean that returned an
-/// invalid shape: meshing itself only says which face failed.
-fn explain_mesh_failure(e: ApiError, c: &Compiled) -> ApiError {
+/// A failed mesh, saying when the shape fails OpenCASCADE's checker, which is the usual reason:
+/// meshing itself only says which face failed.
+fn explain_mesh_failure(e: ApiError, shape: &Shape) -> ApiError {
     let ApiError::MeshFailed(mut message) = e else {
         return e;
     };
-    if !c.shape.is_valid() {
+    if !shape.is_valid() {
         message.push_str(
             ". This may be why: OpenCASCADE's checker reports the shape as invalid; look for \
              faces that only touch or nearly coincide, or call validate_script for details",
         );
-    }
-    if !c.warnings.is_empty() {
-        message.push_str(&format!(
-            ". Earlier in the script: {}",
-            c.warnings.join("; ")
-        ));
     }
     ApiError::MeshFailed(message)
 }
@@ -523,15 +513,13 @@ impl ExportRequest {
     pub(crate) fn run(self, format: ExportFormat, ctx: &JobCtx) -> Result<Output, ApiError> {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
-        let (bytes, mesh, format_warnings) = if format.is_mesh() {
+        let (bytes, mesh, warnings) = if format.is_mesh() {
             export_mesh(ctx, &c.shape, format, self.tolerance)
-                .map_err(|e| explain_mesh_failure(e, &c))?
+                .map_err(|e| explain_mesh_failure(e, &c.shape))?
         } else {
             ctx.set_stage(Stage::Exporting);
             (export::exact(&c.shape, format)?, None, vec![])
         };
-        let mut warnings = c.warnings;
-        warnings.extend(format_warnings);
         let max = ctx.settings.max_export_bytes;
         if bytes.len() > max {
             let hint = if format.is_mesh() {
@@ -564,8 +552,8 @@ fn export_mesh(
     requested: Option<f64>,
 ) -> Result<MeshExport, ApiError> {
     let bbox = measure::bounding_box(shape)?;
-    let (tolerance, warning) = mesh::export_tolerance(requested, diagonal(&bbox));
-    let mut warnings: Vec<String> = warning.into_iter().collect();
+    let tolerance = mesh::export_tolerance(requested, diagonal(&bbox))?;
+    let mut warnings: Vec<String> = vec![];
     if shape.faces().is_empty() {
         return Err(ApiError::EmptyMesh(format!(
             "the shape is a {} with no faces, so its mesh has no triangles; \
@@ -622,25 +610,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mesh_failures_of_valid_shapes_are_left_alone() {
-        let mut cube = Compiled {
-            shape: Shape::cube(1.0).unwrap(),
-            output: vec![],
-            script_ms: 0.0,
-            warnings: vec![],
-        };
+    fn mesh_failures_say_when_the_shape_is_invalid() {
+        let cube = Shape::cube(1.0).unwrap();
         let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &cube);
         assert!(matches!(e, ApiError::MeshFailed(m) if m == "meshing failed"));
         let e = explain_mesh_failure(ApiError::BadRequest("x".into()), &cube);
         assert!(matches!(e, ApiError::BadRequest(m) if m == "x"));
-        // The script's notes still go with it.
-        cube.warnings
-            .push("line 1, position 5: the fuse left them as separate solids".into());
-        let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &cube);
+        // A face bounded by an outline that crosses itself, made directly with OpenCASCADE,
+        // extrudes into an invalid solid.
+        let corners = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)];
+        let bowtie = Shape::polygon(&corners.map(|(x, y)| DVec3::new(x, y, 0.0))).unwrap();
+        let wire = scratchcad_occt_rhai::ffi::topo_ds::TopoDS::Wire(bowtie.raw()).unwrap();
+        let mut make =
+            scratchcad_occt_rhai::ffi::b_rep_builder_api::BRepBuilderAPI_MakeFace_wire(wire, true)
+                .unwrap();
+        let face = Shape::from_raw(make.pin_mut().Shape().unwrap()).unwrap();
+        let solid = face.extrude(DVec3::new(0.0, 0.0, 5.0)).unwrap();
+        assert!(!solid.is_valid());
+        let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &solid);
         assert!(matches!(
             e,
-            ApiError::MeshFailed(m) if m == "meshing failed. Earlier in the script: line 1, \
-                position 5: the fuse left them as separate solids"
+            ApiError::MeshFailed(m) if m.starts_with("meshing failed. This may be why")
         ));
     }
 

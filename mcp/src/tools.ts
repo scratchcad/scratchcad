@@ -40,7 +40,8 @@ const meshFormats = FORMATS.filter((f) => FORMAT_INFO[f].mesh);
 const readOnly = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
 const writing = { readOnlyHint: false, destructiveHint: true };
 
-const missingMass = "Left out, with a warning, when OpenCASCADE can't measure the shape.";
+const missingMass =
+  "Left out, with a warning saying why, when the shape can't be measured exactly.";
 const shapeSummary = z
   .looseObject({
     type: z.string().describe("solid, compound, shell, face, wire, edge or vertex."),
