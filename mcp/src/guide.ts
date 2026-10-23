@@ -73,6 +73,7 @@ Parameters: most users never read the script. They change the part with sliders 
 - The name is a snake_case variable the rest of the script uses: \`thread_length\`, not \`tl\` or \`p1\`.
 - Always give [min, max]. Pick a range over which the part stays valid and sensible, and include the current value. Without a range the slider has to guess one.
 - Compute everything that follows from the parameters (clearances, derived radii, positions) in the script body, not as more parameters, so the part stays consistent whichever slider moves. If one parameter limits another (a fillet radius and a wall thickness, a hole and the plate around it), choose ranges that can't break the part, or clamp in the body with min/max.
+- Only top-level \`let\` lines with a number become sliders. Write fixed numbers that are not for the user to change (a standard's constants, a loop's step count) with \`const\` so they do not become sliders: \`const per_turn = 12;\`. Variables the script assigns again, like a loop's counter, are not sliders.
 - Counts are integers (\`let holes = 4;\`), as loops like \`for i in 0..holes\` need one; lengths and angles are floats with a decimal point (\`let width = 20.0;\`), as integer division truncates (\`7 / 2\` is 3). The slider keeps each literal's kind.
 - Group related parameters under a section line, \`// # Head\`, which the editor shows as a heading.
 For example:

@@ -1,6 +1,7 @@
 // Parameters are the top-level `let` lines of a script that assign a number,
-// optionally followed by a comment with a range and a label. Comment lines
-// starting with `// #` above them start a section:
+// optionally followed by a comment with a range and a label, and that the
+// script does not assign again. Comment lines starting with `// #` above them
+// start a section:
 //
 //   // # Thread
 //   let thread_length = 26.0; // [10, 60] Thread length (mm)
@@ -23,6 +24,8 @@ export interface Param {
   ranged: boolean;
   /** What the user sees: the comment's label, or the name made readable. */
   label: string;
+  /** Whether the script gave the label, rather than it being made from the name. */
+  labelled: boolean;
   /** The `// # Section` the parameter is under, or "" before any. */
   section: string;
   /** 1-based line number. */
@@ -49,12 +52,13 @@ export function parseParams(script: string): Param[] {
   const params: Param[] = [];
   let offset = 0;
   let section = "";
-  script.split("\n").forEach((rawLine, index) => {
+  const lines = script.split("\n");
+  lines.forEach((rawLine, index) => {
     const line = rawLine.replace(/\r$/, "");
     const heading = SECTION.exec(line);
     if (heading) section = heading[1]!;
     const match = PARAM.exec(line);
-    if (match) {
+    if (match && !reassigned(lines, match[2]!, index)) {
       const [, prefix, name, literal, lo, hi, label] = match as unknown as string[];
       const value = Number(literal);
       const integer = !literal!.includes(".");
@@ -72,6 +76,7 @@ export function parseParams(script: string): Param[] {
         step: stepFor(min, max, integer),
         ranged,
         label: label || humanize(name!),
+        labelled: Boolean(label),
         section,
         line: index + 1,
         from,
@@ -81,6 +86,15 @@ export function parseParams(script: string): Param[] {
     offset += rawLine.length + 1;
   });
   return params;
+}
+
+/**
+ * Whether the script assigns `name` on a line other than its own `let`: a
+ * loop's counter or a running total, whose starting value is no slider.
+ */
+function reassigned(lines: string[], name: string, own: number): boolean {
+  const assignment = new RegExp(String.raw`(?:^|[^\w.])${name}\s*(?:\*\*|<<|>>|[-+*/%&|^])?=(?!=)`);
+  return lines.some((line, i) => i !== own && assignment.test(line.replace(/\/\/.*$/, "")));
 }
 
 /**
@@ -126,6 +140,15 @@ export function checkParams(params: Param[]): string[] {
   }
   const notes: string[] = [];
   for (const p of params) {
+    if (!p.ranged && !p.labelled) {
+      // A bare `let pitch = 12.7;` is more often a constant than a forgotten slider.
+      notes.push(
+        `${p.name} = ${p.value} has no range or label, so it becomes a slider from ${p.min} to ` +
+          `${p.max}: add \`// [min, max] Label (unit)\` to its line, or declare it with \`const\` ` +
+          "if it is not for the user to change",
+      );
+      continue;
+    }
     if (!p.ranged) {
       notes.push(`${p.name} has no [min, max] range, so its slider guesses 0 to twice the value`);
     } else if (p.value < p.min || p.value > p.max) {
@@ -133,7 +156,7 @@ export function checkParams(params: Param[]): string[] {
     } else if (p.min === p.max) {
       notes.push(`${p.name} has an empty range [${p.min}, ${p.max}]`);
     }
-    if (p.label === humanize(p.name)) {
+    if (!p.labelled) {
       notes.push(`${p.name} has no label: add one after the range, with units, e.g. "Width (mm)"`);
     }
   }

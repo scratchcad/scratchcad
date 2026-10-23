@@ -460,8 +460,9 @@ describe("save_script and read_script", () => {
       { name: "depth", label: "Depth", section: "Body", value: 8, min: 0, max: 16 },
     ]);
     expect(result.structuredContent!.notes).toEqual([
-      "depth has no [min, max] range, so its slider guesses 0 to twice the value",
-      'depth has no label: add one after the range, with units, e.g. "Width (mm)"',
+      "depth = 8 has no range or label, so it becomes a slider from 0 to 16: add " +
+        "`// [min, max] Label (unit)` to its line, or declare it with `const` if it is not for " +
+        "the user to change",
     ]);
   });
 

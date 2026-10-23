@@ -29,6 +29,20 @@ describe("parseParams", () => {
     expect(params.map((p) => p.name)).toEqual(["thread_length", "blade_count", "offset", "flat"]);
   });
 
+  it("leaves out variables the script assigns again", () => {
+    const script = [
+      "let len = 20.0; // [10, 40] Length (mm)",
+      "let k = 0;",
+      "let total = 0.0;",
+      "let width = 5.0; // [1, 9] Width (mm)",
+      "let depth = 3.0; // depth = 4 in the old drawing",
+      "while k < 3 { total += len; k = k + 1; }",
+      "if width == 5.0 && depth >= 3.0 { print(width.to_string()); }",
+      "box(len, width, total)",
+    ].join("\n");
+    expect(parseParams(script).map((p) => p.name)).toEqual(["len", "width", "depth"]);
+  });
+
   it("reads range, label, kind, section and line", () => {
     expect(params[0]).toMatchObject({
       value: 26,
@@ -138,6 +152,8 @@ describe("checkParams", () => {
 
   it("is quiet about well-formed parameters", () => {
     expect(checkParams(parseParams("let width = 20.0; // [5, 50] Width (mm)"))).toEqual([]);
+    // A label may say no more than the name does: a count of teeth is just "Teeth".
+    expect(checkParams(parseParams("let teeth = 20; // [8, 60] Teeth"))).toEqual([]);
   });
 
   it("names each problem", () => {
@@ -148,6 +164,7 @@ describe("checkParams", () => {
           "let depth = 80.0; // [5, 50] Depth (mm)",
           "let height = 5.0; // [5, 5] Height (mm)",
           "let wall = 2.0; // [1, 4]",
+          "let pitch = 12.7;",
         ].join("\n"),
       ),
     );
@@ -156,6 +173,9 @@ describe("checkParams", () => {
       "depth = 80 is outside its range [5, 50]",
       "height has an empty range [5, 5]",
       'wall has no label: add one after the range, with units, e.g. "Width (mm)"',
+      "pitch = 12.7 has no range or label, so it becomes a slider from 0 to 25.4: add " +
+        "`// [min, max] Label (unit)` to its line, or declare it with `const` if it is not for " +
+        "the user to change",
     ]);
   });
 });
