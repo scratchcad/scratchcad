@@ -5,8 +5,9 @@ use common::{
     subshapes, unique_count, volume,
 };
 use scratchcad_occt_sys::{
-    b_rep_algo_api as algo, b_rep_builder_api as bb, b_rep_feat, b_rep_fillet_api as fillet,
-    b_rep_offset_api as offset, b_rep_prim_api as prim,
+    b_rep_algo_api as algo, b_rep_builder_api as bb, b_rep_check, b_rep_feat,
+    b_rep_fill::{self, LoftSections},
+    b_rep_fillet_api as fillet, b_rep_offset_api as offset, b_rep_prim_api as prim,
     bop_algo::BOPAlgo_GlueEnum,
     geom_abs::GeomAbs_JoinType,
     gp, law, shape_analysis, shape_upgrade, t_col_gp,
@@ -322,6 +323,220 @@ fn pipes_and_lofts() {
     loft.pin_mut().Build(&progress()).unwrap();
     assert!(loft.IsDone());
     assert_close(volume(loft.pin_mut().Shape().unwrap()).abs(), 14.0 * PI / 3.0, 1e-4);
+
+    // A ruled loft through three circles is two frustums; a smooth one bulges between them.
+    let lofted = |ruled: bool| {
+        let mut loft = offset::BRepOffsetAPI_ThruSections_new_ruled(true, ruled);
+        for (z, r) in [(0.0, 1.0), (2.0, 2.0), (4.0, 1.0)] {
+            loft.pin_mut().AddWire(&circle_wire(z, r)).unwrap();
+        }
+        loft.pin_mut().Build(&progress()).unwrap();
+        assert!(loft.IsDone());
+        volume(loft.pin_mut().Shape().unwrap()).abs()
+    };
+    assert_close(lofted(true), 2.0 * 14.0 * PI / 3.0, 1e-4);
+    assert!(lofted(false) > 2.0 * 14.0 * PI / 3.0 + 1.0);
+}
+
+fn wire_list(wires: &[&topo_ds::TopoDS_Wire]) -> cxx::UniquePtr<top_tools::TopTools_ListOfShape> {
+    let mut list = top_tools::new_list_of_shape();
+    for w in wires {
+        list.pin_mut().Append(topo_ds::cast_wire_to_shape(w));
+    }
+    list
+}
+
+/// The loft of two sections that is straight from one to the other: its poles at each u index
+/// are the sections' (degree 1 in v).
+fn straight_loft(
+    sections: &LoftSections,
+    cuts: &[f64],
+    solid: bool,
+) -> Result<Shape, cxx::Exception> {
+    let n = sections.pole_count() as usize;
+    let (coords, weights) = (sections.pole_coords(), sections.pole_weights());
+    let mut poles = Vec::new();
+    let mut w = Vec::new();
+    for i in 0..n {
+        for k in 0..2 {
+            let at = k * n + i;
+            poles.extend((0..3).map(|c| coords.get(3 * at + c).copied().unwrap()));
+            w.push(weights.get(at).copied().unwrap());
+        }
+    }
+    let knots: Vec<f64> = sections.knot_values().iter().copied().collect();
+    let mults: Vec<i32> = sections.knot_mults().iter().copied().collect();
+    b_rep_fill::BRepFill_loft_shape(
+        sections.degree(),
+        &knots,
+        &mults,
+        1,
+        &[0.0, 1.0],
+        &[2, 2],
+        &poles,
+        &w,
+        sections.edge_count(),
+        sections.is_closed(),
+        cuts,
+        solid,
+    )
+}
+
+#[test]
+fn smooth_loft_sections() {
+    // Circles become one exact B-spline each, sharing knots, with every pole accounted for.
+    let circles = b_rep_fill::BRepFill_loft_sections(
+        &wire_list(&[&circle_wire(0.0, 1.0), &circle_wire(2.0, 2.0)]),
+        false,
+    )
+    .unwrap();
+    assert_eq!((circles.section_count(), circles.edge_count()), (2, 1));
+    assert!(circles.is_closed());
+    let mults: i32 = circles.knot_mults().iter().sum();
+    assert_eq!(mults - circles.degree() - 1, circles.pole_count());
+    assert_eq!(circles.knot_values().len(), circles.knot_mults().len());
+    let n = circles.pole_count() as usize;
+    assert_eq!((circles.pole_coords().len(), circles.pole_weights().len()), (6 * n, 2 * n));
+    let knots: Vec<f64> = circles.knot_values().iter().copied().collect();
+    assert_eq!((knots[0], knots[knots.len() - 1]), (0.0, 1.0));
+    let first: Vec<f64> = circles.pole_coords().iter().take(3).copied().collect();
+    assert_close(first[0].hypot(first[1]), 1.0, 1e-12);
+    assert_close(first[2], 0.0, 1e-12);
+
+    // Matching splits the circle where the square has corners, and the square where the circle
+    // starts: five edges, each over [j, j + 1].
+    let square =
+        polygon_wire(&[(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0), (-1.0, 1.0, 0.0)]);
+    let matched =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&square, &circle_wire(2.0, 1.0)]), true)
+            .unwrap();
+    assert_eq!(matched.edge_count(), 5);
+    let knots: Vec<f64> = matched.knot_values().iter().copied().collect();
+    assert_eq!((knots[0], knots[knots.len() - 1]), (0.0, 5.0));
+    for j in 1..5 {
+        assert!(knots.contains(&f64::from(j)), "no knot at {j}: {knots:?}");
+    }
+
+    // Unmatched sections must have the same number of edges.
+    let message =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&square, &circle_wire(2.0, 1.0)]), false)
+            .err()
+            .unwrap()
+            .what()
+            .to_owned();
+    assert!(message.contains("the sections have different numbers of edges"), "{message}");
+
+    // Open sections stay open.
+    let open = |z: f64| {
+        let mut make = bb::BRepBuilderAPI_MakeWire_new();
+        make.pin_mut().add_edge(&edge((0.0, 0.0, z), (1.0, 0.0, z))).unwrap();
+        make.pin_mut().add_edge(&edge((1.0, 0.0, z), (1.0, 1.0, z))).unwrap();
+        topo_ds::TopoDS_Wire_to_owned(make.pin_mut().Wire().unwrap())
+    };
+    let open =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&open(0.0), &open(1.0)]), false).unwrap();
+    assert!(!open.is_closed());
+    assert_eq!(open.edge_count(), 2);
+    // Lines are raised to cubics, so each joint between edges has poles of its own either side.
+    assert_eq!(open.degree(), 3);
+    assert_eq!(open.pole_count(), 7);
+    assert!(circles.degree() >= 3);
+}
+
+#[test]
+fn smooth_loft_shapes() {
+    let valid = |shape: &topo_ds::TopoDS_Shape| {
+        b_rep_check::BRepCheck_Analyzer_new(shape).unwrap().IsValid()
+    };
+    let circles = b_rep_fill::BRepFill_loft_sections(
+        &wire_list(&[&circle_wire(0.0, 1.0), &circle_wire(2.0, 2.0)]),
+        false,
+    )
+    .unwrap();
+    let frustum = straight_loft(&circles, &[0.0, 1.0], true).unwrap();
+    assert!(valid(&frustum));
+    // The surface is the exact cone; the default integration is good to about 1e-7.
+    assert_close(volume(&frustum), 14.0 * PI / 3.0, 1e-5);
+    assert_eq!(unique_count(&frustum, TopAbs_ShapeEnum::TopAbs_FACE), 3);
+
+    // A shell has no caps; cuts split it along v.
+    let cylinder = b_rep_fill::BRepFill_loft_sections(
+        &wire_list(&[&circle_wire(0.0, 1.0), &circle_wire(2.0, 1.0)]),
+        false,
+    )
+    .unwrap();
+    let side = straight_loft(&cylinder, &[0.0, 0.25, 1.0], false).unwrap();
+    assert!(valid(&side));
+    assert_close(area(&side), 4.0 * PI, 1e-9);
+    assert_eq!(unique_count(&side, TopAbs_ShapeEnum::TopAbs_FACE), 2);
+
+    // A face per edge and per stretch between cuts, sharing their edges, closed into a box.
+    let square =
+        |z: f64| polygon_wire(&[(0.0, 0.0, z), (2.0, 0.0, z), (2.0, 3.0, z), (0.0, 3.0, z)]);
+    let squares =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&square(0.0), &square(4.0)]), false)
+            .unwrap();
+    let solid = straight_loft(&squares, &[0.0, 0.5, 1.0], true).unwrap();
+    assert!(valid(&solid));
+    assert_close(volume(&solid), 24.0, 1e-9);
+    assert_eq!(unique_count(&solid, TopAbs_ShapeEnum::TopAbs_FACE), 10);
+    assert_eq!(unique_count(&solid, TopAbs_ShapeEnum::TopAbs_EDGE), 4 * 2 + 4 * 3);
+
+    // Sections running the other way still give a solid facing out.
+    let reversed =
+        |z: f64| polygon_wire(&[(0.0, 0.0, z), (0.0, 3.0, z), (2.0, 3.0, z), (2.0, 0.0, z)]);
+    let reversed =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&reversed(0.0), &reversed(4.0)]), false)
+            .unwrap();
+    let solid = straight_loft(&reversed, &[0.0, 1.0], true).unwrap();
+    assert!(valid(&solid));
+    assert_close(volume(&solid), 24.0, 1e-9);
+
+    let fails = |result: Result<Shape, cxx::Exception>, expected: &str| {
+        let message = result.err().unwrap().what().to_owned();
+        assert!(message.contains(expected), "{message}");
+    };
+    fails(
+        b_rep_fill::BRepFill_loft_shape(
+            1,
+            &[0.0, 1.0],
+            &[2, 2],
+            1,
+            &[0.0, 1.0],
+            &[2, 2],
+            &[0.0; 12],
+            &[1.0; 3],
+            1,
+            false,
+            &[0.0, 1.0],
+            false,
+        ),
+        "the loft's surface data don't fit together",
+    );
+    let open = |z: f64| {
+        let mut make = bb::BRepBuilderAPI_MakeWire_new();
+        make.pin_mut().add_edge(&edge((0.0, 0.0, z), (1.0, 0.0, z))).unwrap();
+        topo_ds::TopoDS_Wire_to_owned(make.pin_mut().Wire().unwrap())
+    };
+    let open =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&open(0.0), &open(1.0)]), false).unwrap();
+    assert!(valid(&straight_loft(&open, &[0.0, 1.0], false).unwrap()));
+    fails(straight_loft(&open, &[0.0, 1.0], true), "a solid loft needs closed sections");
+    let skew =
+        |z: f64| polygon_wire(&[(0.0, 0.0, z), (2.0, 0.0, z), (2.0, 3.0, z + 1.0), (0.0, 3.0, z)]);
+    let skew =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&skew(0.0), &skew(4.0)]), false).unwrap();
+    fails(
+        straight_loft(&skew, &[0.0, 1.0], true),
+        "an end section of a solid loft must lie in a plane",
+    );
+    let flat = |z: f64| polygon_wire(&[(0.0, 0.0, z), (2.0, 0.0, z)]);
+    let flat =
+        b_rep_fill::BRepFill_loft_sections(&wire_list(&[&flat(0.0), &flat(4.0)]), false).unwrap();
+    fails(
+        straight_loft(&flat, &[0.0, 1.0], true),
+        "an end section of a solid loft must enclose an area",
+    );
 }
 
 #[test]

@@ -64,6 +64,9 @@ fn round_primitives() {
     assert_close(Shape::torus(3.0, 1.0).unwrap().volume().unwrap(), 6.0 * PI * PI, 1e-6);
     err_contains(Shape::torus(0.0, 1.0), "major radius");
     err_contains(Shape::torus(1.0, 0.0), "minor radius");
+    // A tube as wide as its ring, or wider, crosses itself.
+    err_contains(Shape::torus(1.0, 1.0), "must be smaller than its major radius, got 1 and 1");
+    err_contains(Shape::torus(1.0, 2.0), "a tube that wide crosses itself");
 }
 
 #[test]
@@ -205,11 +208,9 @@ fn wires_faces_and_compounds() {
     let right = Shape::rect_on(&Plane::xy().translated(v(1.0, 0.0, 0.0)), 0.5, 0.5).unwrap();
     let two_holes = Shape::face_with_holes(&outer, &[left, right]).unwrap();
     assert_close(two_holes.area().unwrap(), 15.5, 1e-9);
-    // A "hole" that splits the face leaves several faces in a compound.
+    // A "hole" that splits the face would leave several faces: that is an error.
     let splitter = Shape::rect_on(&Plane::xy(), 1.0, 10.0).unwrap();
-    let split = Shape::face_with_holes(&outer, &[splitter]).unwrap();
-    assert_eq!(split.shape_type(), ShapeType::Compound);
-    assert_eq!(split.faces().len(), 2);
+    err_contains(Shape::face_with_holes(&outer, &[splitter]), "the holes leave 2 faces");
 
     let compound = Shape::compound(&[solid.clone(), Shape::sphere(1.0).unwrap()]).unwrap();
     assert_eq!(compound.shape_type(), ShapeType::Compound);

@@ -3,6 +3,7 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <GeomAbs_Shape.hxx>
 #include <Standard_NoSuchObject.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
@@ -25,4 +26,10 @@ inline std::unique_ptr<gp_Circ> BRepAdaptor_Curve_circle(const BRepAdaptor_Curve
 inline std::unique_ptr<gp_Pnt> BRepAdaptor_Surface_value(const BRepAdaptor_Surface &surface, const Standard_Real U,
                                                          const Standard_Real V) {
   return std::unique_ptr<gp_Pnt>(new gp_Pnt(surface.Value(U, V)));
+}
+
+// How many pieces the surface is smooth on, with no break in any derivative, within the adaptor's
+// parameter range: 1 for an analytic surface or a Bezier patch, one per knot span for a B-spline.
+inline int BRepAdaptor_Surface_smooth_patches(const BRepAdaptor_Surface &surface) {
+  return surface.NbUIntervals(GeomAbs_CN) * surface.NbVIntervals(GeomAbs_CN);
 }

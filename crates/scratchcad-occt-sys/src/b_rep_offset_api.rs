@@ -88,6 +88,9 @@ mod inner {
             spine: &TopoDS_Wire,
         ) -> Result<UniquePtr<BRepOffsetAPI_MakePipeShell>>;
         pub fn SetMode(self: Pin<&mut BRepOffsetAPI_MakePipeShell>, is_frenet: bool);
+        pub fn BRepOffsetAPI_MakePipeShell_SetRightCorners(
+            make: Pin<&mut BRepOffsetAPI_MakePipeShell>,
+        );
         pub fn Add(
             self: Pin<&mut BRepOffsetAPI_MakePipeShell>,
             profile: &TopoDS_Shape,
@@ -118,6 +121,11 @@ mod inner {
             self: Pin<&mut BRepOffsetAPI_ThruSections>,
             wire: &TopoDS_Wire,
         ) -> Result<()>;
+        #[cxx_name = "construct_unique"]
+        pub fn BRepOffsetAPI_ThruSections_new_ruled(
+            is_solid: bool,
+            ruled: bool,
+        ) -> UniquePtr<BRepOffsetAPI_ThruSections>;
         pub fn CheckCompatibility(self: Pin<&mut BRepOffsetAPI_ThruSections>, check: bool);
         pub fn Shape(self: Pin<&mut BRepOffsetAPI_ThruSections>) -> Result<&TopoDS_Shape>;
         pub fn Build(

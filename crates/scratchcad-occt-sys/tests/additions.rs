@@ -5,7 +5,7 @@ mod common;
 
 use common::{assert_close, make_box, make_box_at, pnt, progress, unique_count, volume};
 use scratchcad_occt_sys::{
-    b_rep_algo_api, b_rep_builder_api, b_rep_class3d,
+    b_rep, b_rep_algo_api, b_rep_builder_api, b_rep_class3d,
     b_rep_g_prop::BRepGProp,
     b_rep_mesh, b_rep_tools, g_prop,
     if_select::IFSelect_ReturnStatus,
@@ -13,6 +13,7 @@ use scratchcad_occt_sys::{
     message::{self, CancelFlag, Message_Gravity},
     step_control,
     top_abs::{TopAbs_ShapeEnum, TopAbs_State},
+    topo_ds,
 };
 use std::sync::{Arc, Mutex};
 
@@ -72,17 +73,58 @@ fn brep_round_trip_in_memory() {
 fn non_destructive_booleans() {
     let a = make_box(2.0, 2.0, 2.0);
     let b = make_box_at(1.0, 1.0, 1.0, 2.0, 2.0, 2.0);
-    let fuse = b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, &progress()).unwrap();
+    // A healthy boolean raises no warnings.
+    let mut warnings = String::from("stale");
+    let fuse = b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, &progress(), &mut warnings).unwrap();
+    assert_eq!(warnings, "");
     assert_close(volume(&fuse), 15.0, 1e-9);
-    let cut = b_rep_algo_api::BRepAlgoAPI_cut(&a, &b, &progress()).unwrap();
+    let cut = b_rep_algo_api::BRepAlgoAPI_cut(&a, &b, &progress(), &mut String::new()).unwrap();
     assert_close(volume(&cut), 7.0, 1e-9);
-    let common = b_rep_algo_api::BRepAlgoAPI_common(&a, &b, &progress()).unwrap();
+    let common =
+        b_rep_algo_api::BRepAlgoAPI_common(&a, &b, &progress(), &mut String::new()).unwrap();
     assert_close(volume(&common), 1.0, 1e-9);
-    let section = b_rep_algo_api::BRepAlgoAPI_section(&a, &b, &progress()).unwrap();
+    let section =
+        b_rep_algo_api::BRepAlgoAPI_section(&a, &b, &progress(), &mut String::new()).unwrap();
     assert!(unique_count(&section, TopAbs_ShapeEnum::TopAbs_EDGE) > 0);
     // The arguments keep their original volumes.
     assert_close(volume(&a), 8.0, 1e-9);
     assert_close(volume(&b), 8.0, 1e-9);
+
+    // Fusing with every child of a compound at once: two boxes overlapping `a` and each other,
+    // and one apart from it.
+    let builder = b_rep::BRep_Builder_new();
+    let builder = b_rep::BRep_Builder_upcast_to_topods_builder(&builder);
+    let mut tools = topo_ds::TopoDS_Compound_new();
+    builder.MakeCompound(tools.pin_mut());
+    let mut tools = topo_ds::TopoDS_Compound_as_shape(tools);
+    builder.Add(tools.pin_mut(), &b).unwrap();
+    builder.Add(tools.pin_mut(), &make_box_at(2.0, 2.0, 2.0, 1.0, 1.0, 1.0)).unwrap();
+    builder.Add(tools.pin_mut(), &make_box_at(10.0, 0.0, 0.0, 1.0, 1.0, 1.0)).unwrap();
+    let all =
+        b_rep_algo_api::BRepAlgoAPI_fuse_children(&a, &tools, &progress(), &mut String::new())
+            .unwrap();
+    assert_close(volume(&all), 16.0, 1e-9);
+    assert_eq!(unique_count(&all, TopAbs_ShapeEnum::TopAbs_SOLID), 2);
+
+    // A compound tool works like its children given separately, even where they overlap each
+    // other: a hole through `a` and a counterbore around its top end.
+    let builder = b_rep::BRep_Builder_new();
+    let builder = b_rep::BRep_Builder_upcast_to_topods_builder(&builder);
+    let mut holes = topo_ds::TopoDS_Compound_new();
+    builder.MakeCompound(holes.pin_mut());
+    let mut holes = topo_ds::TopoDS_Compound_as_shape(holes);
+    builder.Add(holes.pin_mut(), &make_box_at(0.5, 0.5, -1.0, 1.0, 1.0, 4.0)).unwrap();
+    builder.Add(holes.pin_mut(), &make_box_at(0.25, 0.25, 1.5, 1.5, 1.5, 1.5)).unwrap();
+    let drilled =
+        b_rep_algo_api::BRepAlgoAPI_cut(&a, &holes, &progress(), &mut String::new()).unwrap();
+    assert_close(volume(&drilled), 8.0 - 1.5 - 1.125, 1e-9);
+    let inside =
+        b_rep_algo_api::BRepAlgoAPI_common(&a, &holes, &progress(), &mut String::new()).unwrap();
+    assert_close(volume(&inside), 2.625, 1e-9);
+    let merged =
+        b_rep_algo_api::BRepAlgoAPI_fuse(&a, &holes, &progress(), &mut String::new()).unwrap();
+    assert_close(volume(&merged), 8.0 + 1.0 + 2.25, 1e-9);
+    assert_eq!(unique_count(&merged, TopAbs_ShapeEnum::TopAbs_SOLID), 1);
 }
 
 #[test]
@@ -135,14 +177,16 @@ fn cancellable_progress_stops_algorithms() {
     // SAFETY: `flag` outlives `running`.
     let running = unsafe { message::Message_CancellableProgress_new(&flag) };
     let range = message::Message_CancellableProgress_range(&running);
-    assert!(!b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range).unwrap().is_null());
+    assert!(!b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range, &mut String::new())
+        .unwrap()
+        .is_null());
 
     flag.cancel();
     assert!(flag.is_cancelled());
     // SAFETY: `flag` outlives `stopped`.
     let stopped = unsafe { message::Message_CancellableProgress_new(&flag) };
     let range = message::Message_CancellableProgress_range(&stopped);
-    assert!(b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range).unwrap().is_null());
+    assert!(b_rep_algo_api::BRepAlgoAPI_fuse(&a, &b, range, &mut String::new()).unwrap().is_null());
 }
 
 #[test]

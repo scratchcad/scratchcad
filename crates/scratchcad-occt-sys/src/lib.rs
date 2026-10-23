@@ -20,6 +20,7 @@ pub mod b_rep_check;
 pub mod b_rep_class3d;
 pub mod b_rep_extrema;
 pub mod b_rep_feat;
+pub mod b_rep_fill;
 pub mod b_rep_fillet_api;
 pub mod b_rep_g_prop;
 pub mod b_rep_int_curve_surface;

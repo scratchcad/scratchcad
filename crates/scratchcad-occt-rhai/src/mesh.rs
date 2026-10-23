@@ -2,7 +2,7 @@
 
 use crate::{
     cancel::{self, failed, progress},
-    error::{invalid, Result},
+    error::{invalid, Error, Result},
     math::{from_pnt, require_positive},
     shape::Shape,
 };
@@ -205,6 +205,37 @@ impl Mesh {
     }
 }
 
+/// Why meshing failed on `count` faces, the first of them `face`: which face it is and where,
+/// so the model can find it. OpenCASCADE gives no reason, and its checker can pass the shape.
+fn unmeshable(face: &Shape, count: usize) -> Error {
+    let kind = face.geom_type().unwrap_or("other");
+    let place = match face.bounding_box() {
+        Ok(b) => format!(
+            " around {}, within {} to {}",
+            rounded((b.min + b.max) / 2.0),
+            rounded(b.min),
+            rounded(b.max)
+        ),
+        Err(_) => String::new(),
+    };
+    let others = match count {
+        1 => String::new(),
+        n => format!(" (and {} more faces)", n - 1),
+    };
+    invalid(format!(
+        "OpenCASCADE could not mesh the {kind} face{place}{others}. That usually happens where \
+         the face lies on another or meets it along a line, such as a cylinder with the same radius as the \
+         crest of a thread that touches it, even when OpenCASCADE's checker passes the shape: \
+         make one of them a little larger or smaller, by a few hundredths of a millimetre"
+    ))
+}
+
+/// A point to the nearest thousandth, for messages.
+fn rounded(p: DVec3) -> String {
+    let round = |x: f64| (x * 1000.0).round() / 1000.0 + 0.0;
+    format!("({}, {}, {})", round(p.x), round(p.y), round(p.z))
+}
+
 fn facet_normal([a, b, c]: [DVec3; 3]) -> DVec3 {
     (b - a).cross(c - a).normalize_or_zero()
 }
@@ -247,6 +278,7 @@ impl Shape {
         cancel::check()?;
 
         let mut mesh = Mesh::default();
+        let mut unmeshed = Vec::new();
         for face in copy.faces() {
             let topo_face = face.face()?;
             let reversed =
@@ -255,7 +287,8 @@ impl Shape {
             let mut location = ffi::top_loc::Location_new();
             let handle = ffi::b_rep::BRep_Tool_Triangulation(topo_face, location.pin_mut())?;
             let Ok(triangulation) = ffi::poly::Handle_Poly_Triangulation_Get(&handle) else {
-                return Err(failed("meshing a face"));
+                unmeshed.push(face.clone());
+                continue;
             };
             let transform = ffi::top_loc::TopLoc_Location_Transformation(&location);
             ffi::b_rep_lib::BRepLib_ToolTriangulatedShape::ComputeNormals(topo_face, &handle)?;
@@ -282,7 +315,10 @@ impl Shape {
             }
             mesh.face_triangles.push(first..mesh.triangle_count());
         }
-        Ok(mesh)
+        match unmeshed.first() {
+            Some(face) => Err(unmeshable(face, unmeshed.len())),
+            None => Ok(mesh),
+        }
     }
 }
 

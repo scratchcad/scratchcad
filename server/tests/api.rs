@@ -20,7 +20,7 @@ const PLATE: &str = "let plate = box_centered(40, 20, 4).translate([0, 0, 2]);
 
 /// Many booleans, for timeout tests
 const HEAVY: &str = "let s = sphere(10);
-                     for i in 0..100000 { s = s - cylinder([i % 7, 0, -20], \"Z\", 0.5, 40); }
+                     for i in 0..100000 { s = sphere(10) - cylinder([i % 7, 0, -20], \"Z\", 0.5, 40); }
                      s";
 
 fn state_with(args: &[&str]) -> AppState {
@@ -257,6 +257,89 @@ async fn validate_warns_about_shapes_without_solids() {
     assert_eq!(v["shape"]["volume"], 0.0);
     let w = v["warnings"][0].as_str().unwrap();
     assert!(w.starts_with("the shape has no solids"), "{w}");
+}
+
+/// A duct and its inside, lofted ruled through three sections each, whose thin far ends nearly
+/// coincide: the cut of one from the other "succeeds", but returns an invalid shape, which used
+/// to pass for a valid one.
+const SILENTLY_BROKEN: &str = r#"
+let outer = ruled_loft([rect(plane([0, 0, 25], "Z"), 20, 15), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 22, 9),
+                        rect(plane([0, 12, 0], [0, 1, 0.5]), 30, 3)], true);
+let inner = ruled_loft([rect(plane([0, 0, 26.01], "Z"), 17.6, 12.6), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 19.6, 6.6),
+                        rect(plane([0, 12.5, -0.25], [0, 1, 0.5]), 27.6, 0.6)], true);
+cylinder(1, 1).translate([0, 0, 30]) + (outer - inner)
+"#;
+
+#[tokio::test]
+async fn booleans_that_return_invalid_shapes_fail() {
+    let app = app();
+    for (uri, body) in [
+        ("/v1/scripts/validate", json!({ "script": SILENTLY_BROKEN })),
+        (
+            "/v1/raster/3d",
+            json!({ "script": SILENTLY_BROKEN, "width": 32, "height": 32 }),
+        ),
+        ("/v1/export/brep", json!({ "script": SILENTLY_BROKEN })),
+    ] {
+        let r = post(&app, uri, body).await;
+        assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "script_error");
+        let m = error_message(&r);
+        assert!(
+            m.contains("the cut returned an invalid shape"),
+            "{uri}: {m}"
+        );
+        assert!(m.contains("(line 6, position 47)"), "{uri}: {m}");
+    }
+}
+
+/// A 1/4-20 thumb screw: a lofted thread, then a neck whose radius equals the thread's crest
+/// radius. The shape passes OpenCASCADE's checker, but the head's end face can't be meshed.
+const UNMESHABLE: &str = r#"
+const pitch = 1.27;
+const r_major = 3.175;
+let r_minor = r_major - 0.6134 * pitch;
+let hc = pitch / 16.0;
+let r_root = r_minor - 0.05;
+let hr = min(hc + (r_major - r_root) * 0.57735, 0.42 * pitch);
+let section = polygon([[r_root - 0.3, 0, -hr], [r_root, 0, -hr], [r_major, 0, -hc],
+                       [r_major, 0, hc], [r_root, 0, hr], [r_root - 0.3, 0, hr]]);
+let sections = [];
+for i in 0..=(10 * 12) {
+    let t = i.to_float() / 12.0;
+    sections.push(section.rotate_z(t * 360.0).translate([0, 0, t * pitch]));
+}
+let ridge = loft(sections, true).translate([0, 0, -pitch]);
+let rod = cylinder([0, 0, -pitch - 1.0], "Z", r_minor, 11.0 * pitch + 2.0) + ridge;
+let envelope = sketch("XZ").move_to(0, -0.3).hline_to(r_major + 1.0)
+    .vline_to(9.5 - (r_major + 1.0 - r_minor + 0.2)).line_to(r_minor - 0.2, 9.5).hline_to(0)
+    .close().to_face().revolve("Z", 360);
+(rod & envelope).rotate_x(180.0) + cylinder([0, 0, -0.1], "Z", r_major, 1.8)
+"#;
+
+#[tokio::test]
+async fn mesh_failures_say_what_may_have_caused_them() {
+    let app = app();
+    for (uri, body) in [
+        (
+            "/v1/raster/3d",
+            json!({ "script": UNMESHABLE, "width": 32, "height": 32 }),
+        ),
+        (
+            "/v1/raster/2d",
+            json!({ "script": UNMESHABLE, "width": 32, "height": 32 }),
+        ),
+        ("/v1/export/stl", json!({ "script": UNMESHABLE })),
+    ] {
+        let r = post(&app, uri, body).await;
+        assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "mesh_failed");
+        let m = error_message(&r);
+        assert!(
+            m.contains("could not mesh the plane face around (0, 0, -0.1)"),
+            "{uri}: {m}"
+        );
+        // The shape is valid, so nothing is said about that.
+        assert!(!m.contains("This may be why"), "{uri}: {m}");
+    }
 }
 
 #[tokio::test]
@@ -584,16 +667,15 @@ async fn mesh_tolerance() {
     assert_eq!(header_numbers(&coarse, "x-mesh-tolerance"), [0.5]);
     assert!(triangles(&fine) > 4 * triangles(&coarse));
 
-    // Never finer than 1e-5 of the diagonal
-    let (h, _) = post_ok(
+    // A tolerance finer than 1e-5 of the diagonal is refused, rather than meshed coarser
+    let r = post(
         &app,
         "/v1/export/obj",
         json!({ "script": "cube(10)", "tolerance": 1e-9 }),
     )
     .await;
-    let floor = 10.0 * 3f64.sqrt() * 1e-5;
-    assert!((header_numbers(&h, "x-mesh-tolerance")[0] - floor).abs() < 1e-12);
-    assert!(warnings(&h)[0].contains("finer than 1e-5"));
+    assert_error(&r, StatusCode::BAD_REQUEST, "bad_request");
+    assert!(error_message(&r).contains("finer than a mesh can be made"));
 }
 
 #[tokio::test]
@@ -883,11 +965,11 @@ async fn job_timeout_stops_the_script() {
 
 #[tokio::test]
 async fn job_timeout_stops_meshing() {
-    // A sphere meshed at the finest tolerance allowed
+    // A sphere meshed at about the finest tolerance allowed, 1e-5 of its diagonal
     let m = timeout_message(
         &["--job-timeout-ms", "300"],
         "/v1/export/stl",
-        json!({ "script": "sphere(10)", "tolerance": 1e-9 }),
+        json!({ "script": "sphere(10)", "tolerance": 3.5e-4 }),
     )
     .await;
     assert_eq!(m, "meshing exceeded the 0.3 s job budget");

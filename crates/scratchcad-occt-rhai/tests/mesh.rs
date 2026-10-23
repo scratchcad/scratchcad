@@ -145,3 +145,35 @@ fn meshing_leaves_the_shape_untouched() {
     assert!(coarse.triangle_count() < fine.triangle_count());
     assert_eq!(coarse, sphere.mesh(0.1).unwrap());
 }
+
+#[test]
+fn mesh_failures_name_the_face() {
+    // A 1/4-20 thumb screw: a lofted thread, then a neck whose radius equals the thread's crest
+    // radius. The shape passes OpenCASCADE's checker, but the head's end face can't be meshed.
+    let screw = scratchcad_occt_rhai::eval_shape(
+        r#"
+        const pitch = 1.27;
+        const r_major = 3.175;
+        let r_minor = r_major - 0.6134 * pitch;
+        let hc = pitch / 16.0;
+        let r_root = r_minor - 0.05;
+        let hr = min(hc + (r_major - r_root) * 0.57735, 0.42 * pitch);
+        let section = polygon([[r_root - 0.3, 0, -hr], [r_root, 0, -hr], [r_major, 0, -hc],
+                               [r_major, 0, hc], [r_root, 0, hr], [r_root - 0.3, 0, hr]]);
+        let sections = [];
+        for i in 0..=(10 * 12) {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0).translate([0, 0, t * pitch]));
+        }
+        let ridge = loft(sections, true).translate([0, 0, -pitch]);
+        let rod = cylinder([0, 0, -pitch - 1.0], "Z", r_minor, 11.0 * pitch + 2.0) + ridge;
+        let envelope = sketch("XZ").move_to(0, -0.3).hline_to(r_major + 1.0)
+            .vline_to(9.5 - (r_major + 1.0 - r_minor + 0.2)).line_to(r_minor - 0.2, 9.5).hline_to(0)
+            .close().to_face().revolve("Z", 360);
+        (rod & envelope).rotate_x(180.0) + cylinder([0, 0, -0.1], "Z", r_major, 1.8)
+    "#,
+    )
+    .unwrap();
+    assert!(screw.is_valid());
+    err_contains(screw.mesh(0.01), "could not mesh the plane face around (0, 0, -0.1)");
+}

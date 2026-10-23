@@ -269,7 +269,9 @@ impl Raster2dRequest {
         } else {
             ctx.set_stage(Stage::Meshing);
             let max_triangles = ctx.settings.max_mesh_triangles;
-            let welded = mesh::mesh(&c.shape, tolerance, max_triangles)?.welded();
+            let welded = mesh::mesh(&c.shape, tolerance, max_triangles)
+                .map_err(|e| explain_mesh_failure(e, &c.shape))?
+                .welded();
             let segments = render::section(&welded);
             if segments.is_empty() {
                 warnings.push(format!(
@@ -365,7 +367,8 @@ impl Raster3dRequest {
         let tolerance = mesh::render_tolerance(pixel, diagonal(&bbox));
         ctx.set_stage(Stage::Meshing);
         let max_triangles = ctx.settings.max_mesh_triangles;
-        let scene = scene(&c.shape, tolerance, max_triangles, self.edges)?;
+        let scene = scene(&c.shape, tolerance, max_triangles, self.edges)
+            .map_err(|e| explain_mesh_failure(e, &c.shape))?;
         ctx.set_stage(Stage::Rendering);
         let view = View3d {
             width: w,
@@ -384,6 +387,21 @@ impl Raster3dRequest {
         };
         Output::new(&rendered, png)
     }
+}
+
+/// A failed mesh, saying when the shape fails OpenCASCADE's checker, which is the usual reason:
+/// meshing itself only says which face failed.
+fn explain_mesh_failure(e: ApiError, shape: &Shape) -> ApiError {
+    let ApiError::MeshFailed(mut message) = e else {
+        return e;
+    };
+    if !shape.is_valid() {
+        message.push_str(
+            ". This may be why: OpenCASCADE's checker reports the shape as invalid; look for \
+             faces that only touch or nearly coincide, or call validate_script for details",
+        );
+    }
+    ApiError::MeshFailed(message)
 }
 
 /// What a 3D render draws
@@ -496,7 +514,8 @@ impl ExportRequest {
         let c = compile(&self.script, ctx)?;
         let start = Instant::now();
         let (bytes, mesh, warnings) = if format.is_mesh() {
-            export_mesh(ctx, &c.shape, format, self.tolerance)?
+            export_mesh(ctx, &c.shape, format, self.tolerance)
+                .map_err(|e| explain_mesh_failure(e, &c.shape))?
         } else {
             ctx.set_stage(Stage::Exporting);
             (export::exact(&c.shape, format)?, None, vec![])
@@ -533,8 +552,8 @@ fn export_mesh(
     requested: Option<f64>,
 ) -> Result<MeshExport, ApiError> {
     let bbox = measure::bounding_box(shape)?;
-    let (tolerance, warning) = mesh::export_tolerance(requested, diagonal(&bbox));
-    let mut warnings: Vec<String> = warning.into_iter().collect();
+    let tolerance = mesh::export_tolerance(requested, diagonal(&bbox))?;
+    let mut warnings: Vec<String> = vec![];
     if shape.faces().is_empty() {
         return Err(ApiError::EmptyMesh(format!(
             "the shape is a {} with no faces, so its mesh has no triangles; \
@@ -589,6 +608,31 @@ pub async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mesh_failures_say_when_the_shape_is_invalid() {
+        let cube = Shape::cube(1.0).unwrap();
+        let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &cube);
+        assert!(matches!(e, ApiError::MeshFailed(m) if m == "meshing failed"));
+        let e = explain_mesh_failure(ApiError::BadRequest("x".into()), &cube);
+        assert!(matches!(e, ApiError::BadRequest(m) if m == "x"));
+        // A face bounded by an outline that crosses itself, made directly with OpenCASCADE,
+        // extrudes into an invalid solid.
+        let corners = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)];
+        let bowtie = Shape::polygon(&corners.map(|(x, y)| DVec3::new(x, y, 0.0))).unwrap();
+        let wire = scratchcad_occt_rhai::ffi::topo_ds::TopoDS::Wire(bowtie.raw()).unwrap();
+        let mut make =
+            scratchcad_occt_rhai::ffi::b_rep_builder_api::BRepBuilderAPI_MakeFace_wire(wire, true)
+                .unwrap();
+        let face = Shape::from_raw(make.pin_mut().Shape().unwrap()).unwrap();
+        let solid = face.extrude(DVec3::new(0.0, 0.0, 5.0)).unwrap();
+        assert!(!solid.is_valid());
+        let e = explain_mesh_failure(ApiError::MeshFailed("meshing failed".into()), &solid);
+        assert!(matches!(
+            e,
+            ApiError::MeshFailed(m) if m.starts_with("meshing failed. This may be why")
+        ));
+    }
 
     #[test]
     fn validators() {

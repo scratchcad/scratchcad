@@ -57,5 +57,9 @@ mod inner {
             u: f64,
             v: f64,
         ) -> Result<UniquePtr<gp_Pnt>>;
+        /// How many pieces the surface is smooth on, with no break in any derivative, within
+        /// the adaptor's parameter range: 1 for an analytic surface or a Bézier patch, one per
+        /// knot span for a B-spline.
+        pub fn BRepAdaptor_Surface_smooth_patches(surface: &BRepAdaptor_Surface) -> Result<i32>;
     }
 }

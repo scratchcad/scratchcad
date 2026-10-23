@@ -205,6 +205,31 @@ fn edge_and_face_adaptors() {
         .collect();
     assert!(kinds.contains(&GeomAbs_SurfaceType::GeomAbs_Cylinder));
     assert!(kinds.contains(&GeomAbs_SurfaceType::GeomAbs_Plane));
+    for face in subshapes(&cylinder, TopAbs_ShapeEnum::TopAbs_FACE) {
+        let surface = adaptor::BRepAdaptor_Surface_new(TopoDS::Face(&face).unwrap(), true);
+        assert_eq!(adaptor::BRepAdaptor_Surface_smooth_patches(&surface.unwrap()).unwrap(), 1);
+    }
+
+    // A spline through four points has three knot spans, and so does its extrusion's side.
+    let points =
+        points_array(&[(0.0, 0.0, 0.0), (1.0, 1.0, 0.0), (2.0, 0.0, 0.0), (3.0, 1.0, 0.0)]);
+    let mut interpolate = geom_api::GeomAPI_Interpolate_new(&points, false, 1e-7).unwrap();
+    interpolate.pin_mut().Perform().unwrap();
+    let curve = geom_api::GeomAPI_Interpolate_Curve(&interpolate).unwrap();
+    let curve = geom::new_HandleGeomCurve_from_HandleGeom_BSplineCurve(&curve);
+    let mut edge = bb::BRepBuilderAPI_MakeEdge_HandleGeomCurve(&curve).unwrap();
+    let edge = topo_ds::cast_edge_to_shape(edge.pin_mut().Edge().unwrap());
+    let mut side = scratchcad_occt_sys::b_rep_prim_api::BRepPrimAPI_MakePrism_new(
+        edge,
+        &gp::new_vec(0.0, 0.0, 1.0),
+        true,
+        true,
+    )
+    .unwrap();
+    let side = topo_ds::TopoDS_Shape_to_owned(side.pin_mut().Shape().unwrap());
+    let face = first_subshape(&side, TopAbs_ShapeEnum::TopAbs_FACE);
+    let surface = adaptor::BRepAdaptor_Surface_new(TopoDS::Face(&face).unwrap(), true).unwrap();
+    assert_eq!(adaptor::BRepAdaptor_Surface_smooth_patches(&surface).unwrap(), 3);
 }
 
 #[test]

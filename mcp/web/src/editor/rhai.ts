@@ -42,6 +42,7 @@ const CONSTRUCTORS: [name: string, template: string, detail: string][] = [
   ["compound", "compound([${shapes}])", "group of shapes"],
   ["fuse_all", "fuse_all([${shapes}])", "union of many shapes"],
   ["loft", "loft([${sections}], true)", "solid through wires"],
+  ["ruled_loft", "ruled_loft([${sections}])", "straight between wires"],
   ["sketch", 'sketch("${XY}")', "2D drawing in a plane"],
   ["vec3", "vec3(${0}, ${0}, ${0})", "vector"],
   ["plane", 'plane("${XY}")', "sketch plane"],

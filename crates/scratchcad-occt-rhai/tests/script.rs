@@ -173,6 +173,12 @@ fn curve_and_profile_constructors() {
         run::<String>("loft([circle(1), circle([0, 0, 2], \"Z\", 2)], false).shape_type()"),
         "shell"
     );
+    let ruled = "ruled_loft([circle(1), circle([0, 0, 2], \"Z\", 2), circle([0, 0, 4], \"Z\", 1)])";
+    assert_close(f(&format!("{ruled}.volume()")), 28.0 * PI / 3.0, 1e-4);
+    assert_eq!(
+        run::<String>("ruled_loft([circle(1), circle([0, 0, 2], \"Z\", 2)], false).shape_type()"),
+        "shell"
+    );
 
     fails("polygon([[0, 0], [1, 0]])", "at least 3 distinct points");
     fails("polygon([1, 2, 3])", "polygon point must be a vec3");
@@ -654,8 +660,9 @@ fn errors_carry_their_kind() {
     let message = run::<String>("let m = \"\"; try { box(0, 1, 1); } catch (e) { m = e; } m");
     assert!(message.contains("box x size must be positive"), "{message}");
 
+    // Like a failed shell, a failed fillet says what to change, as an invalid argument.
     let error = engine().eval::<Dynamic>("box(1, 1, 1).fillet(50)").unwrap_err();
-    assert!(matches!(error_kind(&error), Some(ErrorKind::Occt | ErrorKind::OperationFailed)));
+    assert_eq!(error_kind(&error), Some(ErrorKind::InvalidArgument));
     let error = engine().eval::<Dynamic>("box(1, 1, 0)").unwrap_err();
     assert_eq!(error_kind(&error), Some(ErrorKind::InvalidArgument));
     let error = engine().eval::<Dynamic>("no_such_function()").unwrap_err();
@@ -694,4 +701,161 @@ fn bundled_examples_run() {
         }
     }
     assert!(count >= 4);
+}
+
+/// A duct and its inside, lofted through three sections each, whose thin far ends nearly
+/// coincide: OpenCASCADE gets the cut of one from the other wrong whichever way they are lofted.
+const DUCT: &str = r#"
+    let outer = LOFT([rect(plane([0, 0, 25], "Z"), 20, 15), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 22, 9),
+                      rect(plane([0, 12, 0], [0, 1, 0.5]), 30, 3)], true);
+    let inner = LOFT([rect(plane([0, 0, 26.01], "Z"), 17.6, 12.6), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 19.6, 6.6),
+                      rect(plane([0, 12.5, -0.25], [0, 1, 0.5]), 27.6, 0.6)], true);
+    outer - inner
+"#;
+
+#[test]
+fn booleans_that_return_invalid_shapes_fail() {
+    // Lofted ruled, the cut "succeeds", but returns an invalid shape.
+    let script = DUCT.replace("LOFT", "ruled_loft");
+    fails(&script, "the cut returned an invalid shape (OpenCASCADE reported: solid builder unused");
+    fails(&script, "(line 6, position 11)");
+    // Healthy booleans, including one fusing shapes that share a face, pass.
+    run::<Shape>("(box(2, 2, 2) + box(1, 1, 1).translate([2, 0, 0])) - cylinder(0.5, 9)");
+}
+
+#[test]
+fn cuts_that_remove_too_much_fail() {
+    // Lofted smooth, the cut keeps 6 mm³ of walls that are over 1000: less than the volume cut
+    // from, 3792.76, less all of the inside's, 2779.28.
+    let script = DUCT.replace("LOFT", "loft");
+    fails(&script, "where it must be at least 1013.4781");
+    fails(&script, "the volume it cut from less that of what it was cut by");
+}
+
+#[test]
+fn fuses_larger_than_their_parts_fail() {
+    // A thread lofted onto a core that its root edge only touches: the fuse comes out a little
+    // larger than the thread and the core together, which no fuse can be.
+    let script = r#"
+        let r_major = 3.0;
+        let r_minor = 2.3866;
+        let w = 0.4167;
+        let section = polygon([[r_minor - 0.3, 0, -w], [r_minor, 0, -w], [r_major, 0, -0.0625],
+                               [r_major, 0, 0.0625], [r_minor, 0, w], [r_minor - 0.3, 0, w]]);
+        let sections = [];
+        for i in 0..=252 {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0).translate([0, 0, t - 1.0]));
+        }
+        let core = cylinder([0, 0, -0.5], "Z", r_minor, 20.5);
+        core + loft(sections, true)
+    "#;
+    fails(script, "the fuse returned a volume of 542.14");
+    fails(script, "the volumes of the solids it fused together");
+    fails(script, "(line 13, position 14)");
+}
+
+#[test]
+fn threads_running_past_their_core_fuse() {
+    // One start of a 4-start T8 lead screw thread running out past both ends of its core.
+    // OpenCASCADE's own smooth loft made a ridge that its boolean missed meeting the core, losing
+    // the core's volume; this loft's ridge fuses.
+    let script = r#"
+        let section = polygon([[2.7, 0, -0.6], [3.05, 0, -0.6], [4.0, 0, -0.3], [4.0, 0, 0.3],
+                               [3.05, 0, 0.6], [2.7, 0, 0.6]]);
+        let sections = [];
+        for i in 0..=60 {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0 + 180.0).translate([0, 0, -8.0 + t * 8.0]));
+        }
+        let core = cylinder([0, 0, -0.5], "Z", 3.1, 31.0);
+        core + loft(sections, true)
+    "#;
+    let screw: Shape = run(script);
+    assert!(screw.is_valid());
+    let core = Shape::cylinder(3.1, 31.0).unwrap().volume().unwrap();
+    assert!(screw.volume().unwrap() > core + 90.0, "{}", screw.volume().unwrap());
+}
+
+#[test]
+fn checks_long_lofts_exactly() {
+    // A 42-turn SM1 thread groove cut to length: integrated directly, the common's volume came
+    // out 30% too high, 2020.9 against at most 1545.8, though its exact volume is 1540.7. Measured
+    // exactly, the check passes it.
+    let script = r#"
+        const pitch = 0.635;
+        const r_major = 13.1445;
+        let r_minor = r_major - 0.541 * pitch;
+        let w = pitch / 16.0 + (r_major + 0.05 - (r_minor - 0.05)) * (30.0 * PI() / 180.0).tan();
+        let section = polygon([[r_minor - 0.6, 0, -w], [r_minor - 0.05, 0, -w], [r_major + 0.05, 0, -pitch / 16.0],
+                               [r_major + 0.05, 0, pitch / 16.0], [r_minor - 0.05, 0, w], [r_minor - 0.6, 0, w]]);
+        let sections = [];
+        for i in 0..=(42 * 12) {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0).translate([0, 0, t * pitch]));
+        }
+        loft(sections, true).translate([0, 0, -pitch]) & cylinder(20.0, 27.4)
+    "#;
+    let groove = eval_shape(script).unwrap();
+    assert!(groove.is_valid());
+    assert_close(groove.volume().unwrap(), 1540.68, 0.01);
+}
+
+#[test]
+fn cuts_that_remove_nothing_fail() {
+    // A helical groove lofted as a square section: OpenCASCADE's cut split the cylinder's faces
+    // where the groove meets them, but removed none of its 148 mm³.
+    let script = r#"
+        let r = 13.0;
+        let s = polygon([[r - 0.8, 0, -0.3], [r + 0.5, 0, -0.3], [r + 0.5, 0, 0.3], [r - 0.8, 0, 0.3]]);
+        let a = [];
+        for i in 0..=36 { let t = i.to_float() / 12.0; a.push(s.rotate_z(t * 360.0).translate([0, 0, t * 1.5])); }
+        cylinder(r, 4.0) - loft(a, true)
+    "#;
+    fails(script, "the cut removed nothing, although the shapes overlap");
+}
+
+#[test]
+fn circles_along_a_helix_start_on_top() {
+    // Their normals turn all the way around Z; OpenCASCADE's own choice of where each circle
+    // starts jumped to the opposite side, which twisted lofts through them.
+    for k in 0..24 {
+        let a = (k as f64 * 15.0).to_radians();
+        let center = v(10.0 * a.cos(), 10.0 * a.sin(), 0.0);
+        let normal = v(-a.sin(), a.cos(), 0.2);
+        let circle = Shape::circle(center, normal, 1.0).unwrap();
+        let start = circle.edges().first().unwrap().start_point().unwrap();
+        assert!(start.z - center.z > 0.95, "{k}: {start}");
+    }
+    // A circle in the XY plane still starts on +X.
+    let flat = Shape::circle(DVec3::ZERO, DVec3::Z, 2.0).unwrap();
+    assert_vec_close(flat.edges().first().unwrap().start_point().unwrap(), v(2.0, 0.0, 0.0), 1e-9);
+}
+
+#[test]
+fn vectors_index_like_arrays() {
+    assert_close(run::<f64>("let v = vec3(1, 2, 3); v[0] + v[1] * 10 + v[-1] * 100"), 321.0, 0.0);
+    assert_close(run::<f64>("let v = box(1, 2, 3).bounding_box().max; v[2]"), 3.0, 1e-6);
+    assert_close(run::<f64>("let v = vec3(1, 2, 3); v[1] = 7; v.y"), 7.0, 0.0);
+    fails("vec3(1, 2, 3)[3]", "components 0 to 2");
+    fails("let v = vec3(1, 2, 3); v[-4] = 1", "components 0 to 2");
+}
+
+#[test]
+fn compound_tools_may_overlap() {
+    // A clearance hole and its counterbore cut as one compound, as the guide suggests for many
+    // holes: OpenCASCADE takes a compound operand to hold no overlapping shapes, so the
+    // counterbore used to be left uncut.
+    let setup = r#"
+        let blk = box_centered(30, 30, 20);
+        let holes = compound([cylinder([0, 0, -15], "Z", 3.3, 30.0), cylinder([0, 0, 4], "Z", 5.5, 10.0)]);
+    "#;
+    let f = |expr: &str| run::<f64>(&format!("{setup} {expr}"));
+    let separately = f("(blk - cylinder([0, 0, -15], \"Z\", 3.3, 30.0) - cylinder([0, 0, 4], \"Z\", 5.5, 10.0)).volume()");
+    assert_close(f("(blk - holes).volume()"), separately, 1e-6);
+    assert_close(f("(blk & holes).volume()"), 18000.0 - separately, 1e-6);
+    assert_eq!(
+        run::<INT>(&format!("{setup} (blk + holes.translate([20, 0, 0])).solids().len()")),
+        1
+    );
 }

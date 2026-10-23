@@ -2,7 +2,7 @@
 //! validity, size and mass properties, and warnings about anything that will
 //! cause trouble later.
 
-use scratchcad_occt_rhai::{DVec3, Error, Shape};
+use scratchcad_occt_rhai::{DVec3, Error, MassProperties, Shape};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
@@ -52,14 +52,33 @@ fn array(v: DVec3) -> [f64; 3] {
     v.to_array()
 }
 
+/// The mass properties to report, which are exact, or a warning saying why they can't be
+/// measured: a shape whose faces can't all be split into Bézier patches has no exact volume, and
+/// an approximate one is never reported.
+fn checked(measured: Result<MassProperties, Error>) -> (Option<MassProperties>, Vec<String>) {
+    match measured {
+        Ok(m) => (Some(m), vec![]),
+        Err(e) => (
+            None,
+            vec![format!(
+                "the volume, area and center are left out, as they could not be measured \
+                 exactly: {e}"
+            )],
+        ),
+    }
+}
+
 /// Measures the shape and lists what is likely to go wrong with it. Without `mass`, the
-/// volume, area and center, which take the longest to measure, are left out.
+/// volume, area and center, which take the longest to measure, are left out; they are also left
+/// out, with a warning, when they can't be measured exactly, as the rest still describes the
+/// shape.
 pub fn summarize(shape: &Shape, mass: bool) -> Result<(ShapeSummary, Vec<String>), ApiError> {
     let bbox = bounding_box(shape)?;
-    let mass = if mass {
-        Some(shape.mass_properties().map_err(measure_error)?)
+    let valid = shape.is_valid();
+    let (mass, notes) = if mass {
+        checked(shape.mass_properties())
     } else {
-        None
+        (None, vec![])
     };
     let summary = ShapeSummary {
         kind: shape.shape_type().name().into(),
@@ -67,7 +86,7 @@ pub fn summarize(shape: &Shape, mass: bool) -> Result<(ShapeSummary, Vec<String>
         faces: shape.faces().len(),
         edges: shape.edges().len(),
         vertices: shape.vertices().len(),
-        valid: shape.is_valid(),
+        valid,
         bounding_box: BoundingBox {
             min: array(bbox.min),
             max: array(bbox.max),
@@ -77,7 +96,8 @@ pub fn summarize(shape: &Shape, mass: bool) -> Result<(ShapeSummary, Vec<String>
         area: mass.map(|m| m.area),
         center: mass.map(|m| array(m.center)),
     };
-    let warnings = warnings(&summary);
+    let mut warnings = warnings(&summary);
+    warnings.extend(notes);
     Ok((summary, warnings))
 }
 
@@ -159,6 +179,23 @@ mod tests {
         let w = warnings(&s);
         assert_eq!(w.len(), 1);
         assert!(w[0].contains("invalid"));
+    }
+
+    #[test]
+    fn unmeasurable_mass_properties_are_left_out_with_a_warning() {
+        let m = MassProperties {
+            volume: 1.0,
+            area: 6.0,
+            center: DVec3::ZERO,
+        };
+        assert_eq!(checked(Ok(m)), (Some(m), vec![]));
+        let (kept, notes) = checked(Err(Error::OperationFailed("split")));
+        assert_eq!(kept, None);
+        assert!(
+            notes[0].contains("left out") && notes[0].contains("split"),
+            "{}",
+            notes[0]
+        );
     }
 
     #[test]

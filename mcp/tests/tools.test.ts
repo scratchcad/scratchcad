@@ -154,6 +154,23 @@ describe("validate_script", () => {
     );
   });
 
+  it("describes a shape scratchcad could not measure", async () => {
+    const { client, fake } = await setup();
+    const unmeasured = Object.fromEntries(
+      Object.entries(SHAPE).filter(([key]) => !["volume", "area", "center"].includes(key)),
+    );
+    const warnings = [
+      "the volume, area and center are left out: OpenCASCADE could not measure them",
+    ];
+    fake.handler = () => response(200, { ...VALIDATED, shape: unmeasured, warnings });
+    const result = await call(client, "validate_script", { script: SCRIPT });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ ...VALIDATED, shape: unmeasured, warnings });
+    const saved = await call(client, "save_script", { script: SCRIPT, path: "u.rhai" });
+    expect(saved.isError).toBeFalsy();
+    expect(saved.structuredContent!.shape).toEqual(unmeasured);
+  });
+
   it("rejects a missing script before sending anything", async () => {
     const { client, fake } = await setup();
     expect(await callError(client, "validate_script", {})).toContain("script");
