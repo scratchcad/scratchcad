@@ -8,6 +8,9 @@
    they follow the light/dark theme like the Tailwind classes do. */
 :root {
   color-scheme: light dark;
+  /* Fonts such as Inter turn "2x4" into "2×4" with contextual alternates, which misprints file
+     names (lego_2x4.rhai) and dimensions. */
+  font-variant-ligatures: no-contextual;
   --editor-bg: #ffffff;
   --editor-border: #e4e4e7;
   --editor-muted: #a1a1aa;
