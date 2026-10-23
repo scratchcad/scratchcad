@@ -437,6 +437,10 @@ fn smooth_loft_sections() {
         b_rep_fill::BRepFill_loft_sections(&wire_list(&[&open(0.0), &open(1.0)]), false).unwrap();
     assert!(!open.is_closed());
     assert_eq!(open.edge_count(), 2);
+    // Lines are raised to cubics, so each joint between edges has poles of its own either side.
+    assert_eq!(open.degree(), 3);
+    assert_eq!(open.pole_count(), 7);
+    assert!(circles.degree() >= 3);
 }
 
 #[test]

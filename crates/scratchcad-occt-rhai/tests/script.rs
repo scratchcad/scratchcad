@@ -726,9 +726,9 @@ fn booleans_that_return_invalid_shapes_fail() {
 #[test]
 fn cuts_that_remove_too_much_fail() {
     // Lofted smooth, the cut keeps 6 mm³ of walls that are over 1000: less than the volume cut
-    // from, 3787.27, less all of the inside's, 2775.77.
+    // from, 3792.76, less all of the inside's, 2779.28.
     let script = DUCT.replace("LOFT", "loft");
-    fails(&script, "where it must be at least 1011.5016");
+    fails(&script, "where it must be at least 1013.4781");
     fails(&script, "the volume it cut from less that of what it was cut by");
 }
 

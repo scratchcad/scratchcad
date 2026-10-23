@@ -26,7 +26,8 @@ mod inner {
         pub fn pole_coords(self: &LoftSections) -> &CxxVector<f64>;
         pub fn pole_weights(self: &LoftSections) -> &CxxVector<f64>;
 
-        /// The wires as compatible B-splines, edge `j` running over `[j, j + 1]`, conics exactly.
+        /// The wires as compatible B-splines of degree 3 or more, edge `j` running over
+        /// `[j, j + 1]`, conics exactly.
         /// With `match_edges`, they are first given the same number of edges and matching
         /// starting points (`BRepFill_CompatibleWires`). Throws on an offset curve, which has no
         /// exact B-spline form, or on wires that can't be matched up.

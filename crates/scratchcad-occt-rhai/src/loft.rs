@@ -4,9 +4,9 @@
 //! OpenCASCADE's smooth loft fits one polynomial through the sections, which swings past them
 //! where they are unevenly spaced (by 8 mm on sections 12 to 16 mm in radius), and fails or creases
 //! where sections of several edges meet. This one is built pole by pole. The sections are made
-//! compatible B-splines with OpenCASCADE's matching (the same degree and knots, edge `j` over
-//! `[j, j + 1]` in u), so the loft is a B-spline surface whose poles at each section are that
-//! section's poles. Between sections, each pole follows a quintic: its position, and its first and
+//! compatible B-splines with OpenCASCADE's matching (the same degree, at least 3, and knots, edge
+//! `j` over `[j, j + 1]` in u), so the loft is a B-spline surface whose poles at each section are
+//! that section's poles. Between sections, each pole follows a quintic: its position, and its first and
 //! second derivatives, are given at each section and shared by the segments either side, so the
 //! surface is curvature-continuous (C2) across every section, and the knots there say so.
 //!
@@ -751,7 +751,8 @@ impl Joint {
 }
 
 /// The joints of C0 knots in u (and the seam of closed sections) that are smooth in at least one
-/// section: where the joint's pole lies strictly between its neighbours, in line with them.
+/// section: where the joint's pole lies strictly between its neighbours, in line with them. The
+/// sections are at least cubic, so no two joints share a neighbour, and each is rebuilt on its own.
 fn joints(sec: &Sections, hh: &[Vec<H4>]) -> Vec<Joint> {
     let n = sec.count();
     let nu = sec.poles_per_section();
@@ -768,7 +769,6 @@ fn joints(sec: &Sections, hh: &[Vec<H4>]) -> Vec<Joint> {
     if sec.closed {
         candidates.push((nu - 2, 0, 1));
     }
-    let mut used = vec![false; nu];
     let mut out = Vec::new();
     for (a, v, b) in candidates {
         let mut joint = Joint { a, v, b, smooth: vec![false; n], x: vec![0.0; n], y: vec![0.0; n] };
@@ -779,10 +779,7 @@ fn joints(sec: &Sections, hh: &[Vec<H4>]) -> Vec<Joint> {
                 joint.y[k] = y;
             }
         }
-        // A pole can be rebuilt for one joint only (an edge of three poles has one between).
-        if joint.smooth.iter().any(|&s| s) && !used[a] && !used[b] {
-            used[a] = true;
-            used[b] = true;
+        if joint.smooth.iter().any(|&s| s) {
             out.push(joint);
         }
     }

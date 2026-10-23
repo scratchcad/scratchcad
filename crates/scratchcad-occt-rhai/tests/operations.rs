@@ -416,6 +416,22 @@ fn lofts_through_sections_of_several_edges() {
     assert!(mixed.is_valid());
     let rim = mixed.edges().select(">Z").unwrap();
     assert!(mixed.fillet(1.0, rim.shapes()).unwrap().is_valid());
+    // A triangle, a square and a hexagon: the triangle's sides are split where the others have
+    // corners, and the faces either side of each split start out tangent. The loft is as
+    // symmetric as its sections, and the triangle's rim fillets.
+    let polygons =
+        Shape::loft(&[regular(0.0, 3, 15.0), regular(20.0, 4, 14.0), regular(45.0, 6, 13.0)], true)
+            .unwrap();
+    assert!(polygons.is_valid());
+    let mirrored = polygons.mirror(DVec3::ZERO, DVec3::Y).unwrap();
+    assert!(
+        polygons.common(&mirrored).unwrap().volume().unwrap()
+            > 0.999999 * polygons.volume().unwrap()
+    );
+    let rim = polygons.edges().select("<Z").unwrap();
+    for r in [0.5, 1.0, 2.0] {
+        assert!(polygons.fillet(r, rim.shapes()).unwrap().is_valid(), "r = {r}");
+    }
 }
 
 #[test]

@@ -31,9 +31,9 @@
 #include <gp_Pln.hxx>
 #include <vector>
 
-// The sections of a smooth loft as B-spline curves sharing a degree and knots, so that the loft is
-// a B-spline surface through them, and its edges match up: a section of several edges runs over
-// [0, edges], its edge j over [j, j + 1].
+// The sections of a smooth loft as B-spline curves sharing a degree (at least 3) and knots, so that
+// the loft is a B-spline surface through them, and its edges match up: a section of several edges
+// runs over [0, edges], its edge j over [j, j + 1].
 class LoftSections {
 public:
   int32_t u_degree = 0, edges = 0, sections = 0, poles_per_section = 0;
@@ -85,6 +85,12 @@ inline Handle(Geom_BSplineCurve) loft_wire_curve(const TopoDS_Wire &wire) {
         GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(curve, a, b), Convert_QuasiAngular);
     if (ex.Orientation() == TopAbs_REVERSED) {
       piece->Reverse();
+    }
+    // At least cubic, which changes nothing about the curve: each joint between edges then has
+    // poles either side of its own. A line's two poles are its ends, so a joint's neighbours
+    // would be the next joints, and not every smooth joint could be kept smooth.
+    if (piece->Degree() < 3) {
+      piece->IncreaseDegree(3);
     }
     TColStd_Array1OfReal knots(1, piece->NbKnots());
     piece->Knots(knots);
