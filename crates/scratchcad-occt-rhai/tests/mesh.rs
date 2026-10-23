@@ -149,7 +149,7 @@ fn meshing_leaves_the_shape_untouched() {
 #[test]
 fn mesh_failures_name_the_face() {
     // A 1/4-20 thumb screw: a lofted thread, then a neck whose radius equals the thread's crest
-    // radius. The shape passes OpenCASCADE's checker, but the neck's cylinder can't be meshed.
+    // radius. The shape passes OpenCASCADE's checker, but the head's end face can't be meshed.
     let screw = scratchcad_occt_rhai::eval_shape(
         r#"
         const pitch = 1.27;
@@ -175,5 +175,5 @@ fn mesh_failures_name_the_face() {
     )
     .unwrap();
     assert!(screw.is_valid());
-    err_contains(screw.mesh(0.01), "could not mesh the cylinder face around (0, 0, 0.8)");
+    err_contains(screw.mesh(0.01), "could not mesh the plane face around (0, 0, -0.1)");
 }

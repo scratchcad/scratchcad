@@ -1,7 +1,7 @@
 mod common;
 
 use common::{assert_close, assert_vec_close, cube10, err, err_contains, v};
-use scratchcad_occt_rhai::{ffi, DVec2, DVec3, Error, Plane, Shape, ShapeType};
+use scratchcad_occt_rhai::{ffi, DVec2, DVec3, Error, Plane, PointLocation, Shape, ShapeType};
 use std::f64::consts::PI;
 
 #[test]
@@ -144,10 +144,10 @@ fn measuring_leaves_shapes_alone() {
 }
 
 #[test]
-fn what_cannot_be_measured_exactly_fails() {
-    // A helical slot whose inner edge runs along a bore of the same radius: OpenCASCADE cannot
-    // split the result into Bézier patches, so it can't be measured exactly, and the cut, whose
-    // result can't then be checked, fails rather than return an unchecked shape.
+fn helical_slots_grazing_a_bore_cut_and_measure() {
+    // A helical slot whose inner edge runs along a bore of the same radius. Lofted by
+    // OpenCASCADE, the cut's result couldn't be split into Bézier patches to be measured; this
+    // loft's cuts and measures, close to a ruled loft through the same sections.
     let blade = Shape::polygon(&[
         v(2.5, 0.0, -0.35),
         v(10.5, 0.0, -0.35),
@@ -164,10 +164,11 @@ fn what_cannot_be_measured_exactly_fails() {
         .collect();
     let tube =
         Shape::cylinder(9.5, 25.0).unwrap().cut(&Shape::cylinder(2.5, 25.0).unwrap()).unwrap();
-    let m = err(tube.cut(&Shape::loft(&sections, true).unwrap())).to_string();
-    assert!(m.contains("the cut could not be checked, so its result is not used"), "{m}");
-    assert!(m.contains("such as a tool whose edge runs along a bore of the same radius"), "{m}");
-    assert!(m.contains("can't be measured exactly: OpenCASCADE could not split"), "{m}");
+    let smooth = tube.cut(&Shape::loft(&sections, true).unwrap()).unwrap();
+    let ruled = tube.cut(&Shape::ruled_loft(&sections, true).unwrap()).unwrap();
+    assert!(smooth.is_valid());
+    let (s, r) = (smooth.volume().unwrap(), ruled.volume().unwrap());
+    assert_close(s, r, 1e-3 * r);
 }
 
 #[test]
@@ -306,8 +307,9 @@ fn revolutions_sweeps_and_lofts() {
 
 #[test]
 fn lofts_through_unevenly_spaced_sections() {
-    // Circles of radius 11 to 16 at x = 0, 90, 172 and 180: the smooth loft swings past them,
-    // to a radius between 4.3 and 21.4, which is what ruled_loft is for.
+    // Circles of radius 11 to 16 at x = 0, 90, 172 and 180. OpenCASCADE's smooth loft swung past
+    // them, to a radius between 4.3 and 21.4; this one stays between each pair of sections, and
+    // passes through every one.
     let rings: Vec<Shape> = [(0.0, 12.0), (90.0, 13.0), (172.0, 16.0), (180.0, 11.0)]
         .iter()
         .map(|(x, r)| Shape::circle(v(*x, 0.0, 0.0), DVec3::X, *r).unwrap())
@@ -317,8 +319,27 @@ fn lofts_through_unevenly_spaced_sections() {
         loft.common(&slice.unwrap()).unwrap().bounding_box().unwrap().size().y / 2.0
     };
     let smooth = Shape::loft(&rings, true).unwrap();
-    assert_close(radius_at(&smooth, 45.0), 4.29, 0.01);
-    assert_close(radius_at(&smooth, 135.0), 21.40, 0.01);
+    assert!(smooth.is_valid());
+    for (x, lo, hi) in [
+        (10.0, 12.0, 13.0),
+        (45.0, 12.0, 13.0),
+        (89.0, 12.0, 13.0),
+        (91.0, 13.0, 16.0),
+        (135.0, 13.0, 16.0),
+        (171.0, 13.0, 16.0),
+        (173.0, 11.0, 16.0),
+        (176.0, 11.0, 16.0),
+        (179.0, 11.0, 16.0),
+    ] {
+        let r = radius_at(&smooth, x);
+        assert!((lo - 1e-6..=hi + 1e-6).contains(&r), "radius {r} at x = {x}");
+    }
+    for ring in &rings {
+        for k in 0..8 {
+            let p = ring.edges().shapes()[0].point_at(k as f64 / 8.0).unwrap();
+            assert_eq!(smooth.classify(p).unwrap(), PointLocation::OnBoundary, "{p}");
+        }
+    }
     // A ruled loft runs straight from each section to the next: the slices' widest ends, at
     // x = 45.1 and 175.9, are where they are measured.
     let ruled = Shape::ruled_loft(&rings, true).unwrap();
@@ -328,6 +349,142 @@ fn lofts_through_unevenly_spaced_sections() {
     let skin = Shape::ruled_loft(&rings[..2], false).unwrap();
     assert_eq!(skin.shape_type(), ShapeType::Shell);
     err_contains(Shape::ruled_loft(&rings[..1], true), "at least 2 sections");
+}
+
+/// A rectangle 2w by 2d with its corners rounded to r, at height z: lines and arcs that meet
+/// tangentially.
+fn rounded_rect(z: f64, w: f64, d: f64, r: f64) -> Shape {
+    // Each arc's midpoint is c in from its corner in x and in y.
+    let c = r - r * std::f64::consts::FRAC_1_SQRT_2;
+    let parts = [
+        Shape::line(v(w, -d + r, z), v(w, d - r, z)),
+        Shape::arc(v(w, d - r, z), v(w - c, d - c, z), v(w - r, d, z)),
+        Shape::line(v(w - r, d, z), v(-w + r, d, z)),
+        Shape::arc(v(-w + r, d, z), v(-w + c, d - c, z), v(-w, d - r, z)),
+        Shape::line(v(-w, d - r, z), v(-w, -d + r, z)),
+        Shape::arc(v(-w, -d + r, z), v(-w + c, -d + c, z), v(-w + r, -d, z)),
+        Shape::line(v(-w + r, -d, z), v(w - r, -d, z)),
+        Shape::arc(v(w - r, -d, z), v(w - c, -d + c, z), v(w, -d + r, z)),
+    ];
+    Shape::wire_from(&parts.map(Result::unwrap)).unwrap()
+}
+
+fn regular(z: f64, sides: usize, r: f64) -> Shape {
+    let points: Vec<DVec3> = (0..sides)
+        .map(|i| {
+            let a = 2.0 * PI * i as f64 / sides as f64;
+            v(r * a.cos(), r * a.sin(), z)
+        })
+        .collect();
+    Shape::polygon(&points).unwrap()
+}
+
+#[test]
+fn lofts_through_sections_of_several_edges() {
+    // Rounded rectangles and a circle: one face per matched edge, tangent where the sections are
+    // smooth, so the rims fillet and the solid shells.
+    let sections = [
+        rounded_rect(0.0, 20.0, 10.0, 4.0),
+        Shape::circle(v(0.0, 0.0, 25.0), DVec3::Z, 12.0).unwrap(),
+        rounded_rect(50.0, 15.0, 8.0, 3.0),
+    ];
+    let duct = Shape::loft(&sections, true).unwrap();
+    assert!(duct.is_valid());
+    let top = duct.edges().select(">Z").unwrap();
+    let rounded = duct.fillet(1.0, top.shapes()).unwrap();
+    assert!(rounded.is_valid() && rounded.volume().unwrap() < duct.volume().unwrap());
+    let cup = duct.shell(-1.0, duct.faces().select(">Z").unwrap().shapes()).unwrap();
+    assert!(cup.is_valid());
+    // The sections are smooth where their edges meet, so the faces either side of every edge
+    // running along the duct are tangent across it, to within the ten-thousandth of a degree that
+    // fillets tell a corner by: there is none there to round.
+    let along: Vec<Shape> =
+        duct.edges().iter().filter(|e| e.bounding_box().unwrap().size().z > 1.0).cloned().collect();
+    assert!(along.len() >= 8, "{} edges along the duct", along.len());
+    err_contains(duct.fillet(1.0, &along), "faces that continue each other");
+    // A square, a hexagon and a circle: their corners don't match, so their edges are split to
+    // match. The rim on the circle fillets.
+    let mixed = Shape::loft(
+        &[
+            regular(20.0, 4, 14.0),
+            regular(45.0, 6, 13.0),
+            Shape::circle(v(0.0, 0.0, 70.0), DVec3::Z, 12.0).unwrap(),
+        ],
+        true,
+    )
+    .unwrap();
+    assert!(mixed.is_valid());
+    let rim = mixed.edges().select(">Z").unwrap();
+    assert!(mixed.fillet(1.0, rim.shapes()).unwrap().is_valid());
+}
+
+#[test]
+fn lofts_are_the_same_wherever_the_part_is() {
+    let rings: Vec<Shape> = [(0.0, 12.0), (90.0, 13.0), (172.0, 16.0), (180.0, 11.0)]
+        .iter()
+        .map(|(x, r)| Shape::circle(v(*x, 0.0, 0.0), DVec3::X, *r).unwrap())
+        .collect();
+    let moved: Vec<Shape> = rings
+        .iter()
+        .map(|r| {
+            r.rotate(DVec3::ZERO, v(0.3, 0.5, 0.8), 40.0)
+                .unwrap()
+                .translate(v(5.0, -7.0, 11.0))
+                .unwrap()
+        })
+        .collect();
+    let here = Shape::loft(&rings, true).unwrap();
+    let there = Shape::loft(&moved, true).unwrap();
+    assert_close(there.volume().unwrap(), here.volume().unwrap(), 1e-9 * here.volume().unwrap());
+    let back =
+        there.translate(v(-5.0, 7.0, -11.0)).unwrap().rotate(DVec3::ZERO, v(0.3, 0.5, 0.8), -40.0);
+    assert_vec_close(back.unwrap().center().unwrap(), here.center().unwrap(), 1e-9);
+}
+
+#[test]
+fn lofts_that_cannot_be_built_say_why() {
+    let ring = |z: f64, r: f64| Shape::circle(v(0.0, 0.0, z), DVec3::Z, r).unwrap();
+    err_contains(
+        Shape::loft(&[ring(0.0, 5.0), ring(0.0, 5.0)], true),
+        "sections 1 and 2 are the same",
+    );
+    let open =
+        Shape::wire_from(&[Shape::line(v(-5.0, 0.0, 10.0), v(5.0, 0.0, 10.0)).unwrap()]).unwrap();
+    err_contains(
+        Shape::loft(&[ring(0.0, 5.0), open.clone()], true),
+        "every section must be a closed wire",
+    );
+    err_contains(
+        Shape::loft(&[open.clone(), open.translate(v(0.0, 0.0, 5.0)).unwrap()], true),
+        "a solid loft needs closed sections",
+    );
+    err_contains(
+        Shape::loft(
+            &[
+                open.clone(),
+                open.translate(v(0.0, 3.0, 5.0)).unwrap(),
+                open.translate(v(0.0, 0.0, 10.0)).unwrap(),
+            ],
+            false,
+        ),
+        "section 1 is straight",
+    );
+    // An end section that isn't flat can't be capped.
+    let bent = Shape::spline(
+        &[v(5.0, 0.0, 0.0), v(0.0, 5.0, 1.0), v(-5.0, 0.0, 0.0), v(0.0, -5.0, 1.0)],
+        true,
+    )
+    .unwrap();
+    err_contains(
+        Shape::loft(&[bent, ring(10.0, 5.0)], true),
+        "an end section of a solid loft must lie in a plane",
+    );
+    // Open sections loft into a shell.
+    let arc =
+        |z: f64| Shape::arc(v(-5.0, 0.0, z), v(0.0, 3.0 + z / 10.0, z), v(5.0, 0.0, z)).unwrap();
+    let sheet = Shape::loft(&[arc(0.0), arc(5.0), arc(12.0)], false).unwrap();
+    assert_eq!(sheet.shape_type(), ShapeType::Shell);
+    assert!(sheet.is_valid());
 }
 
 #[test]

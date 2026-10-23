@@ -53,6 +53,7 @@
 pub mod cancel;
 mod error;
 mod io;
+mod loft;
 pub mod math;
 mod mesh;
 pub mod messages;

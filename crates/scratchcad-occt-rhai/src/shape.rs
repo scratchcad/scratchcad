@@ -704,30 +704,22 @@ impl Shape {
             let inputs_valid = self.is_valid() && other.is_valid();
             return Err(invalid(invalid_boolean(name, &warnings, inputs_valid)));
         }
-        match self.volume_problem(other, name, &result) {
-            Ok(None) => Ok(result),
-            Ok(Some(problem)) => Err(invalid(problem)),
-            Err(Error::Cancelled) => Err(Error::Cancelled),
-            Err(e) => Err(invalid(format!(
-                "the {name} could not be checked, so its result is not used: {e}. That usually \
-                 comes from faces that graze or nearly coincide, such as a tool whose edge runs \
-                 along a bore of the same radius: make the tool overlap the faces it meets \
-                 clearly, by a few hundredths of a millimetre or more"
-            ))),
-        }
+        checked(name, self.volume_problem(other, name, &result))?;
+        Ok(result)
     }
 
     /// What is wrong with a boolean's result whose volume no correct result could have: a fuse
-    /// smaller than one of the solids it fused, or a cut or common larger than the solids it was
-    /// cut from. OpenCASCADE returns such results without an error or a warning where faces graze
-    /// or nearly coincide (a lofted thread ridge running out past the end of its core lost the
-    /// core's volume to it).
+    /// smaller than one of the solids it fused or larger than all of them together, a cut larger
+    /// than the shape it was cut from or smaller than that less the tool, or a common larger than
+    /// either side. OpenCASCADE returns such results without an error or a warning where faces
+    /// graze or nearly coincide (a lofted thread ridge running out past the end of its core lost
+    /// the core's volume to it; a duct cut from its inside kept 6 mm³ of its 1200 mm³ walls).
     ///
-    /// The result's volume, and the bound it is held to, are measured exactly (see
-    /// [`volume`](Self::volume)): a fuse is held to the solid that looks largest, a cut to the
-    /// shape it was cut from, a common to the side that looks smaller. Any solid's exact volume
-    /// bounds a fuse, and either side's a common, so integrating the solids directly, which is
-    /// fast but can be off by percent on long lofts, only picks which to measure exactly.
+    /// The result's volume, and the bounds it is held to, are measured exactly (see
+    /// [`volume`](Self::volume)). Integrating the solids directly, which is fast but can be off by
+    /// percent on long lofts, only picks which to measure: a fuse is held below by the solid that
+    /// looks largest (any solid's exact volume bounds it), a common above by the side that looks
+    /// smaller.
     fn volume_problem(&self, other: &Shape, name: &str, result: &Raw) -> Result<Option<String>> {
         let (a, b) = (self.solids(), other.solids());
         if a.is_empty() || b.is_empty() || name == "section" {
@@ -738,23 +730,38 @@ impl Shape {
         };
         let (rough_a, rough_b) = (rough(&a)?, rough(&b)?);
         let exact = |solids: &Selection| -> Result<f64> { solids.iter().map(Shape::volume).sum() };
-        // As the boolean returns it, so that measuring the shape again finds its split kept.
-        let result = Self::from_algorithm(result)?;
-        let got = result.volume()?;
         let (sum_a, sum_b) = (rough_a.iter().sum::<f64>(), rough_b.iter().sum::<f64>());
-        let bound = match name {
+        // What a correct result's volume lies between, and the scale its slack is a part of.
+        let (lower, upper, bound) = match name {
             "fuse" => {
                 let solids = a.iter().zip(&rough_a).chain(b.iter().zip(&rough_b));
-                match solids.max_by(|x, y| x.1.total_cmp(y.1)) {
+                let largest = match solids.max_by(|x, y| x.1.total_cmp(y.1)) {
                     Some((largest, _)) => largest.volume()?,
                     None => return Ok(None),
-                }
+                };
+                (largest, exact(&a)? + exact(&b)?, largest)
             },
-            "cut" => exact(&a)?,
-            _ if sum_a <= sum_b => exact(&a)?,
-            _ => exact(&b)?,
+            "cut" => {
+                let from = exact(&a)?;
+                // A cut removes no more than the tool's volume. Solids of a compound cut from may
+                // overlap, so that bound only holds for one.
+                let lower = if a.len() == 1 { from - exact(&b)? } else { f64::NEG_INFINITY };
+                (lower, from, from)
+            },
+            _ if sum_a <= sum_b => {
+                let side = exact(&a)?;
+                (0.0, side, side)
+            },
+            _ => {
+                let side = exact(&b)?;
+                (0.0, side, side)
+            },
         };
-        if let Some(problem) = impossible_volume(name, got, bound) {
+        // As the boolean returns it, and after the bounds, so that measuring the shape again
+        // finds its split the newest kept.
+        let result = Self::from_algorithm(result)?;
+        let got = result.volume()?;
+        if let Some(problem) = impossible_volume(name, got, lower, upper) {
             return Ok(Some(problem));
         }
         // OpenCASCADE can also miss that two solids meet at all, and then fuse them into a
@@ -880,10 +887,22 @@ impl Shape {
     // Transforms
     // ---------------------------------------------------------------------------------------
 
-    fn transformed(&self, transform: &ffi::gp::gp_Trsf) -> Result<Self> {
+    /// A copy of this shape moved by `transform`. A `rigid` one (a translation or a rotation) is
+    /// remembered with this shape, so that measuring it reuses this shape's split.
+    fn transformed(&self, transform: &ffi::gp::gp_Trsf, rigid: bool) -> Result<Self> {
         let mut make =
             ffi::b_rep_builder_api::BRepBuilderAPI_Transform_new(self.raw(), transform, true)?;
-        Self::from_raw(make.pin_mut().Shape()?)
+        let copy = Self::from_raw(make.pin_mut().Shape()?)?;
+        if rigid {
+            let by = Rc::new(ffi::top_loc::Location_from_transform(transform));
+            COPIES.with_borrow_mut(|copies| {
+                if copies.len() == KEPT_COPIES {
+                    copies.remove(0);
+                }
+                copies.push((copy.clone(), self.clone(), by));
+            });
+        }
+        Ok(copy)
     }
 
     pub fn translate(&self, delta: DVec3) -> Result<Self> {
@@ -892,7 +911,7 @@ impl Shape {
         }
         let mut transform = ffi::gp::new_transform();
         transform.pin_mut().set_translation_vec(&vector(delta));
-        self.transformed(&transform)
+        self.transformed(&transform, true)
     }
 
     /// Rotates around the axis through `origin` along `axis` by `degrees` (right-hand rule).
@@ -900,7 +919,7 @@ impl Shape {
         require_finite(degrees, "rotation angle")?;
         let mut transform = ffi::gp::new_transform();
         transform.pin_mut().SetRotation(&*axis1(origin, axis)?, degrees.to_radians());
-        self.transformed(&transform)
+        self.transformed(&transform, true)
     }
 
     /// Scales uniformly about `center`. The factor must be non-zero (negative factors mirror).
@@ -911,14 +930,14 @@ impl Shape {
         }
         let mut transform = ffi::gp::new_transform();
         transform.pin_mut().SetScale(&point(center), factor);
-        self.transformed(&transform)
+        self.transformed(&transform, false)
     }
 
     /// Mirrors through the plane with the given origin and normal.
     pub fn mirror(&self, origin: DVec3, normal: DVec3) -> Result<Self> {
         let mut transform = ffi::gp::new_transform();
         transform.pin_mut().set_mirror_plane(&*axis2(origin, normal)?);
-        self.transformed(&transform)
+        self.transformed(&transform, false)
     }
 
     // ---------------------------------------------------------------------------------------
@@ -1067,12 +1086,14 @@ impl Shape {
         Ok(swept)
     }
 
-    /// A smooth shape passing through all sections (wires, or faces whose outer wire is used).
-    ///
-    /// Through three or more sections it can swing past them, the more so the more unevenly
-    /// they are spaced: circles of radius 12 to 16 at x = 0, 60, 120 and 180 loft to a radius
-    /// between 11.6 and 15.9, but at x = 0, 90, 172 and 180 to one between 4.3 and 21.4. Space
-    /// sections evenly, or use [`ruled_loft`](Self::ruled_loft), which stays between them.
+    /// A smooth shape passing through all sections (wires, or faces whose outer wire is used)
+    /// exactly, curvature-continuous across each, that stays between each pair of sections
+    /// however they are spaced: through circles of radius 12, 13, 16 and 11 at x = 0, 90, 172
+    /// and 180, its radius stays between 12 and 13, 13 and 16, then 16 and 11. Sections with
+    /// several edges, such as rounded rectangles, have their vertices matched up first, and the
+    /// faces either side of an edge where a section is smooth stay tangent. Each section must
+    /// span a plane, which says how the loft turns there: loft straight ones with
+    /// [`ruled_loft`](Self::ruled_loft).
     pub fn loft(sections: &[Shape], solid: bool) -> Result<Self> {
         Self::loft_through(sections, solid, false)
     }
@@ -1104,23 +1125,41 @@ impl Shape {
         // joined start to start: matching them changes nothing where it works, and it fails on
         // circles around more than a few turns of a helix. (circle() starts circles along a path
         // on the same side; see `circle_edge`.)
-        let single = wires.iter().all(|w| w.is_closed() && w.edges().len() == 1);
-        let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new_ruled(solid, ruled);
-        make.pin_mut().CheckCompatibility(!single);
         for wire in &wires {
-            make.pin_mut().AddWire(wire.wire()?)?;
+            wire.wire()?;
         }
-        let built = make.pin_mut().Build(&progress()).is_ok() && make.IsDone();
-        if !built {
-            crate::cancel::check()?;
+        let single = wires.iter().all(|w| w.is_closed() && w.edges().len() == 1);
+        let closed = wires.iter().filter(|w| w.is_closed()).count();
+        if closed != 0 && closed != wires.len() {
             return Err(invalid(
-                "loft failed: OpenCASCADE could not join these sections. Make every section a \
-                 closed wire (or every one open), with none crossing another; circles along a \
-                 path are best made with circle(center, normal, r), which starts each on the same \
-                 side",
+                "loft failed: every section must be a closed wire, or every one an open wire",
             ));
         }
-        let lofted = Self::from_algorithm(make.pin_mut().Shape()?)?;
+        if solid && closed == 0 {
+            return Err(invalid(
+                "loft failed: a solid loft needs closed sections; loft open wires into a shell, \
+                 with solid false",
+            ));
+        }
+        let lofted = if ruled {
+            let mut make = ffi::b_rep_offset_api::BRepOffsetAPI_ThruSections_new_ruled(solid, true);
+            make.pin_mut().CheckCompatibility(!single);
+            for wire in &wires {
+                make.pin_mut().AddWire(wire.wire()?)?;
+            }
+            if make.pin_mut().Build(&progress()).is_err() || !make.IsDone() {
+                crate::cancel::check()?;
+                return Err(invalid(
+                    "loft failed: OpenCASCADE could not join these sections. Make every section a \
+                     closed wire (or every one open), with none crossing another; circles along a \
+                     path are best made with circle(center, normal, r), which starts each on the \
+                     same side",
+                ));
+            }
+            Self::from_algorithm(make.pin_mut().Shape()?)?
+        } else {
+            crate::loft::loft(&wires, solid, !single)?
+        };
         if !lofted.is_valid() {
             return Err(invalid(
                 "loft failed: the lofted shape is invalid, which OpenCASCADE's checker rejects. \
@@ -1589,6 +1628,19 @@ impl Shape {
         if !self.faces().iter().any(free_form) && !self.edges().iter().any(free_form) {
             return Ok(self.clone());
         }
+        // A copy moved rigidly (translated or rotated) is its source's split, moved with it, so
+        // copies of one shape (the blades of a blisk, a pattern of bosses) share one split.
+        let copied = COPIES.with_borrow(|copies| {
+            copies
+                .iter()
+                .find(|(copy, ..)| copy.is_same(self))
+                .map(|(_, source, by)| (source.clone(), by.clone()))
+        });
+        if let Some((source, by)) = copied {
+            let mut moved = ffi::topo_ds::TopoDS_Shape_to_owned(source.for_measuring()?.raw());
+            moved.pin_mut().translate(&by, false)?;
+            return Self::from_unique(moved);
+        }
         // Splitting takes most of the time, and the same shape is often measured more than once,
         // as a boolean's result and then the script's: the last few splits are kept. A shape
         // never changes, so its split stays right.
@@ -1620,11 +1672,17 @@ impl Shape {
             ))
             })?;
         let split = Self::from_unique(split)?;
-        // Integrating at fixed points is accurate on a face only where its surface is smooth
-        // throughout. The split cuts offset surfaces, which shelling free-form faces makes, at
-        // their base surface's knots, but can't turn them into Bézier patches.
+        split.require_smooth_faces()?;
+        Ok(split)
+    }
+
+    /// Fails unless every face's surface is smooth throughout. Integrating at fixed points is
+    /// accurate on a face only where it is. The split for measuring cuts offset surfaces, which
+    /// shelling free-form faces makes, at their base surface's knots, but can't turn them into
+    /// Bézier patches.
+    fn require_smooth_faces(&self) -> Result<()> {
         let mut rough = 0;
-        for face in split.faces().iter() {
+        for face in self.faces().iter() {
             let surface = ffi::b_rep_adaptor::BRepAdaptor_Surface_new(face.face()?, true)?;
             if ffi::b_rep_adaptor::BRepAdaptor_Surface_smooth_patches(&surface)? != 1 {
                 rough += 1;
@@ -1636,7 +1694,7 @@ impl Shape {
                  pieces that are smooth throughout"
             )));
         }
-        Ok(split)
+        Ok(())
     }
 
     /// The enclosed volume (0 for shapes without solids), measured exactly (see
@@ -2024,23 +2082,45 @@ fn valid(shape: &Raw) -> bool {
     ffi::b_rep_check::BRepCheck_Analyzer_new(shape).map(|a| a.IsValid()).unwrap_or(false)
 }
 
+/// A boolean's result given what its checks found: an error for a problem, and for checks that
+/// could not run, as a result they can't vouch for is not used.
+fn checked(name: &str, outcome: Result<Option<String>>) -> Result<()> {
+    match outcome {
+        Ok(None) => Ok(()),
+        Ok(Some(problem)) => Err(invalid(problem)),
+        Err(Error::Cancelled) => Err(Error::Cancelled),
+        Err(e) => Err(invalid(format!(
+            "the {name} could not be checked, so its result is not used: {e}. That usually comes \
+             from faces that graze or nearly coincide, such as a tool whose edge runs along a bore \
+             of the same radius: make the tool overlap the faces it meets clearly, by a few \
+             hundredths of a millimetre or more"
+        ))),
+    }
+}
+
 /// What is wrong with a boolean `name` ("fuse", "cut" or "common") that returned a volume of
-/// `got`, if no correct result could have it: a fuse is at least `bound`, the volume of one of
-/// the solids it fused, and a cut or common at most `bound`, the volume of the shape it was cut
-/// from or of one side. The volumes are exact to about 1e-7, so a millionth is allowed for.
-fn impossible_volume(name: &str, got: f64, bound: f64) -> Option<String> {
+/// `got`, if no correct result could have it: one that isn't between `lower` and `upper`. A fuse
+/// is at least the volume of one of the solids it fused and at most their sum; a cut at most the
+/// volume it cut from, and at least that less the tool's; a common at most either side's. The
+/// volumes are exact to about 1e-7, so a millionth of the largest is allowed for.
+fn impossible_volume(name: &str, got: f64, lower: f64, upper: f64) -> Option<String> {
     const SLACK: f64 = 1e-6;
-    let expected = match name {
-        "fuse" if got < (1.0 - SLACK) * bound => {
-            format!("at least {bound:.6}, the volume of one of the solids it fused")
-        },
-        "cut" if got > (1.0 + SLACK) * bound => {
-            format!("at most {bound:.6}, the volume it cut from")
-        },
-        "common" if got > (1.0 + SLACK) * bound => {
-            format!("at most {bound:.6}, the volume of one side")
-        },
-        _ => return None,
+    let slack = SLACK * upper.max(lower.abs());
+    let expected = if got < lower - slack {
+        match name {
+            "fuse" => format!("at least {lower:.6}, the volume of one of the solids it fused"),
+            _ => format!(
+                "at least {lower:.6}, the volume it cut from less that of what it was cut by"
+            ),
+        }
+    } else if got > upper + slack {
+        match name {
+            "fuse" => format!("at most {upper:.6}, the volumes of the solids it fused together"),
+            "cut" => format!("at most {upper:.6}, the volume it cut from"),
+            _ => format!("at most {upper:.6}, the volume of one side"),
+        }
+    } else {
+        return None;
     };
     Some(format!(
         "the {name} returned a volume of {got:.6} where it must be {expected}: OpenCASCADE's \
@@ -2219,10 +2299,22 @@ fn shell_failed(shape: &Shape, thickness: f64) -> Error {
 /// How many shapes' Bézier splits [`Shape::for_measuring`] keeps.
 const KEPT_SPLITS: usize = 4;
 
+/// A copy of a shape moved rigidly, the shape it was copied from, and the motion between them.
+type RigidCopy = (Shape, Shape, Rc<UniquePtr<ffi::top_loc::TopLoc_Location>>);
+
+/// How many rigid copies [`COPIES`] remembers: enough for the patterns scripts make. Each keeps
+/// its two shapes alive until it is dropped for a newer one.
+const KEPT_COPIES: usize = 256;
+
 thread_local! {
     /// The shapes last split for measuring, with their splits, oldest first. Shapes never leave
     /// their thread, so neither do these.
     static SPLITS: std::cell::RefCell<Vec<(Shape, Shape)>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+
+    /// The last rigid copies made, oldest first.
+    static COPIES: std::cell::RefCell<Vec<RigidCopy>> = const {
         std::cell::RefCell::new(Vec::new())
     };
 }
@@ -2261,15 +2353,106 @@ mod tests {
 
     #[test]
     fn impossible_boolean_volumes() {
-        assert_eq!(impossible_volume("fuse", 8.0, 8.0), None);
-        let fuse = impossible_volume("fuse", 7.999, 8.0).unwrap();
+        assert_eq!(impossible_volume("fuse", 8.0, 8.0, 12.0), None);
+        assert_eq!(impossible_volume("fuse", 12.0, 8.0, 12.0), None);
+        let fuse = impossible_volume("fuse", 7.999, 8.0, 12.0).unwrap();
         assert!(fuse.contains("a volume of 7.999000 where it must be at least 8.000000"), "{fuse}");
-        assert_eq!(impossible_volume("cut", 8.0, 8.0), None);
-        let cut = impossible_volume("cut", 8.001, 8.0).unwrap();
+        let fuse = impossible_volume("fuse", 12.1, 8.0, 12.0).unwrap();
+        assert!(fuse.contains("at most 12.000000, the volumes of the solids it fused"), "{fuse}");
+        assert_eq!(impossible_volume("cut", 8.0, 4.0, 8.0), None);
+        let cut = impossible_volume("cut", 8.001, 4.0, 8.0).unwrap();
         assert!(cut.contains("at most 8.000000, the volume it cut from"), "{cut}");
-        assert_eq!(impossible_volume("common", 4.0, 4.0), None);
-        let common = impossible_volume("common", 4.001, 4.0).unwrap();
+        let cut = impossible_volume("cut", 3.9, 4.0, 8.0).unwrap();
+        assert!(
+            cut.contains("at least 4.000000, the volume it cut from less that of what"),
+            "{cut}"
+        );
+        assert_eq!(impossible_volume("cut", 0.0, f64::NEG_INFINITY, 8.0), None);
+        assert_eq!(impossible_volume("common", 4.0, 0.0, 4.0), None);
+        let common = impossible_volume("common", 4.001, 0.0, 4.0).unwrap();
         assert!(common.contains("at most 4.000000, the volume of one side"), "{common}");
+    }
+
+    #[test]
+    fn checks_that_cannot_run_reject_the_result() {
+        assert!(checked("fuse", Ok(None)).is_ok());
+        let m = checked("cut", Ok(Some("wrong".into()))).unwrap_err().to_string();
+        assert!(m.ends_with("wrong"), "{m}");
+        assert!(matches!(checked("cut", Err(Error::Cancelled)), Err(Error::Cancelled)));
+        let m = checked("cut", Err(invalid("no split"))).unwrap_err().to_string();
+        assert!(m.contains("the cut could not be checked, so its result is not used"), "{m}");
+        assert!(m.contains("no split"), "{m}");
+    }
+
+    #[test]
+    fn faces_that_are_not_smooth_throughout_cannot_be_measured() {
+        // A loft's side is one face with a knot at each inner section; its Bézier split isn't.
+        let rings: Vec<Shape> = [(0.0, 5.0), (4.0, 6.0), (9.0, 4.0)]
+            .iter()
+            .map(|(z, r)| Shape::circle(DVec3::new(0.0, 0.0, *z), DVec3::Z, *r).unwrap())
+            .collect();
+        let lofted = Shape::loft(&rings, true).unwrap();
+        let m = lofted.require_smooth_faces().unwrap_err().to_string();
+        assert!(m.contains("can't be measured exactly: 1 of its faces could not be split"), "{m}");
+        assert!(lofted.split_for_measuring().is_ok());
+    }
+
+    #[test]
+    fn rigid_copies_are_measured_through_their_source() {
+        let rings: Vec<Shape> = [(0.0, 5.0), (4.0, 6.0), (9.0, 4.0)]
+            .iter()
+            .map(|(z, r)| Shape::circle(DVec3::new(0.0, 0.0, *z), DVec3::Z, *r).unwrap())
+            .collect();
+        let lofted = Shape::loft(&rings, true).unwrap();
+        let moved = lofted.rotate(DVec3::ZERO, DVec3::X, 30.0).unwrap();
+        let moved = moved.translate(DVec3::new(5.0, -2.0, 7.0)).unwrap();
+        // A deep copy shares nothing, so it is split and measured on its own.
+        let alone = moved.deep_copy().unwrap();
+        let (a, b) = (moved.mass_properties().unwrap(), alone.mass_properties().unwrap());
+        assert!((a.volume - b.volume).abs() <= 1e-9 * b.volume, "{} {}", a.volume, b.volume);
+        assert!((a.area - b.area).abs() <= 1e-9 * b.area, "{} {}", a.area, b.area);
+        assert!((a.center - b.center).length() <= 1e-9, "{} {}", a.center, b.center);
+        SPLITS.with_borrow(|splits| {
+            assert!(splits.iter().any(|(shape, _)| shape.is_same(&lofted)));
+            assert!(!splits.iter().any(|(shape, _)| shape.is_same(&moved)));
+        });
+        // A scaled copy isn't a rigid one: it is split itself.
+        let scaled = lofted.scale(DVec3::ZERO, 2.0).unwrap();
+        let v = scaled.volume().unwrap();
+        assert!((v - 8.0 * lofted.volume().unwrap()).abs() <= 1e-6 * v, "{v}");
+        SPLITS
+            .with_borrow(|splits| assert!(splits.iter().any(|(shape, _)| shape.is_same(&scaled))));
+    }
+
+    /// A boolean's checks against a result made up to be wrong in each way they catch.
+    #[test]
+    fn checks_catch_each_kind_of_wrong_result() {
+        // Overlapping by a corner, through which each has edges inside the other.
+        let a = Shape::cube(10.0).unwrap();
+        let b = Shape::cube(10.0).unwrap().translate(DVec3::splat(5.0)).unwrap();
+        let empty = Shape::compound(&[]).unwrap();
+        let problem =
+            |name: &str, result: &Shape| a.volume_problem(&b, name, result.raw()).unwrap();
+        let small = Shape::make_box(5.0, 5.0, 5.0).unwrap();
+        let big = Shape::make_box(20.0, 20.0, 20.0).unwrap();
+        assert!(problem("fuse", &small).unwrap().contains("must be at least 1000"));
+        assert!(problem("fuse", &big).unwrap().contains("must be at most 2000"));
+        let apart = Shape::compound(&[a.clone(), b.clone()]).unwrap();
+        assert!(problem("fuse", &apart).unwrap().contains("left them as separate, overlapping"));
+        assert!(problem("cut", &big).unwrap().contains("must be at most 1000"));
+        assert!(problem("cut", &a).unwrap().contains("the cut removed nothing"));
+        // A slab 2 thick cut from the cube leaves 800 of its 1000, not 400.
+        let slab = Shape::make_box(2.0, 10.0, 10.0).unwrap().translate(DVec3::new(4.0, 0.0, 0.0));
+        let left = Shape::make_box(4.0, 10.0, 10.0).unwrap();
+        let m = a.volume_problem(&slab.unwrap(), "cut", left.raw()).unwrap().unwrap();
+        assert!(m.contains("a volume of 400.000000 where it must be at least 800.000000"), "{m}");
+        assert!(problem("cut", &empty).unwrap().contains("the cut removed everything"));
+        assert!(problem("common", &empty).unwrap().contains("found nothing in common"));
+        assert!(problem("common", &big).unwrap().contains("must be at most 1000"));
+        // The right answers pass.
+        assert_eq!(problem("fuse", &a.fuse(&b).unwrap()), None);
+        assert_eq!(problem("cut", &a.cut(&b).unwrap()), None);
+        assert_eq!(problem("common", &a.common(&b).unwrap()), None);
     }
 
     #[test]

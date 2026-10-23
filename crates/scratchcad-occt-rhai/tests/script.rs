@@ -703,10 +703,39 @@ fn bundled_examples_run() {
     assert!(count >= 4);
 }
 
+/// A duct and its inside, lofted through three sections each, whose thin far ends nearly
+/// coincide: OpenCASCADE gets the cut of one from the other wrong whichever way they are lofted.
+const DUCT: &str = r#"
+    let outer = LOFT([rect(plane([0, 0, 25], "Z"), 20, 15), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 22, 9),
+                      rect(plane([0, 12, 0], [0, 1, 0.5]), 30, 3)], true);
+    let inner = LOFT([rect(plane([0, 0, 26.01], "Z"), 17.6, 12.6), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 19.6, 6.6),
+                      rect(plane([0, 12.5, -0.25], [0, 1, 0.5]), 27.6, 0.6)], true);
+    outer - inner
+"#;
+
 #[test]
 fn booleans_that_return_invalid_shapes_fail() {
-    // A thread lofted onto a core whose surface its root edge only touches: the fuse "succeeds",
-    // but returns an invalid shape, which a later common silently dropped.
+    // Lofted ruled, the cut "succeeds", but returns an invalid shape.
+    let script = DUCT.replace("LOFT", "ruled_loft");
+    fails(&script, "the cut returned an invalid shape (OpenCASCADE reported: solid builder unused");
+    fails(&script, "(line 6, position 11)");
+    // Healthy booleans, including one fusing shapes that share a face, pass.
+    run::<Shape>("(box(2, 2, 2) + box(1, 1, 1).translate([2, 0, 0])) - cylinder(0.5, 9)");
+}
+
+#[test]
+fn cuts_that_remove_too_much_fail() {
+    // Lofted smooth, the cut keeps 6 mm³ of walls that are over 1000: less than the volume cut
+    // from, 3787.27, less all of the inside's, 2775.77.
+    let script = DUCT.replace("LOFT", "loft");
+    fails(&script, "where it must be at least 1011.5016");
+    fails(&script, "the volume it cut from less that of what it was cut by");
+}
+
+#[test]
+fn fuses_larger_than_their_parts_fail() {
+    // A thread lofted onto a core that its root edge only touches: the fuse comes out a little
+    // larger than the thread and the core together, which no fuse can be.
     let script = r#"
         let r_major = 3.0;
         let r_minor = 2.3866;
@@ -721,38 +750,31 @@ fn booleans_that_return_invalid_shapes_fail() {
         let core = cylinder([0, 0, -0.5], "Z", r_minor, 20.5);
         core + loft(sections, true)
     "#;
-    fails(script, "the fuse returned an invalid shape (OpenCASCADE reported: ");
-    fails(script, "acquired self intersection");
+    fails(script, "the fuse returned a volume of 542.14");
+    fails(script, "the volumes of the solids it fused together");
     fails(script, "(line 13, position 14)");
-    // Healthy booleans, including one fusing shapes that share a face, pass.
-    run::<Shape>("(box(2, 2, 2) + box(1, 1, 1).translate([2, 0, 0])) - cylinder(0.5, 9)");
 }
 
-/// One start of a 4-start T8 lead screw thread running out past both ends of its core:
-/// OpenCASCADE misses that they meet, and fuses them into a compound of the two overlapping
-/// solids without an error or a warning.
-pub const GRAZING_FUSE: &str = r#"
-    let section = polygon([[2.7, 0, -0.6], [3.05, 0, -0.6], [4.0, 0, -0.3], [4.0, 0, 0.3],
-                           [3.05, 0, 0.6], [2.7, 0, 0.6]]);
-    let sections = [];
-    for i in 0..=60 {
-        let t = i.to_float() / 12.0;
-        sections.push(section.rotate_z(t * 360.0 + 180.0).translate([0, 0, -8.0 + t * 8.0]));
-    }
-    let core = cylinder([0, 0, -0.5], "Z", 3.1, 31.0);
-    core + loft(sections, true)
-"#;
-
 #[test]
-fn booleans_that_miss_an_overlap_fail() {
-    // The fuse loses volume: less than the larger solid on its own.
-    fails(GRAZING_FUSE, "the fuse returned a volume of 800.34");
-    fails(GRAZING_FUSE, "where it must be at least 935.91");
-    // The common misses the overlap too.
-    fails(
-        &GRAZING_FUSE.replace("core + loft", "core & loft"),
-        "the common found nothing in common",
-    );
+fn threads_running_past_their_core_fuse() {
+    // One start of a 4-start T8 lead screw thread running out past both ends of its core.
+    // OpenCASCADE's own smooth loft made a ridge that its boolean missed meeting the core, losing
+    // the core's volume; this loft's ridge fuses.
+    let script = r#"
+        let section = polygon([[2.7, 0, -0.6], [3.05, 0, -0.6], [4.0, 0, -0.3], [4.0, 0, 0.3],
+                               [3.05, 0, 0.6], [2.7, 0, 0.6]]);
+        let sections = [];
+        for i in 0..=60 {
+            let t = i.to_float() / 12.0;
+            sections.push(section.rotate_z(t * 360.0 + 180.0).translate([0, 0, -8.0 + t * 8.0]));
+        }
+        let core = cylinder([0, 0, -0.5], "Z", 3.1, 31.0);
+        core + loft(sections, true)
+    "#;
+    let screw: Shape = run(script);
+    assert!(screw.is_valid());
+    let core = Shape::cylinder(3.1, 31.0).unwrap().volume().unwrap();
+    assert!(screw.volume().unwrap() > core + 90.0, "{}", screw.volume().unwrap());
 }
 
 #[test]
@@ -791,20 +813,6 @@ fn cuts_that_remove_nothing_fail() {
         cylinder(r, 4.0) - loft(a, true)
     "#;
     fails(script, "the cut removed nothing, although the shapes overlap");
-}
-
-#[test]
-fn cuts_that_remove_everything_fail() {
-    // A duct and its inside, lofted through three sections each: OpenCASCADE's cut of one from
-    // the other came out empty.
-    let script = r#"
-        let outer = loft([rect(plane([0, 0, 25], "Z"), 20, 15), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 22, 9),
-                          rect(plane([0, 12, 0], [0, 1, 0.5]), 30, 3)], true);
-        let inner = loft([rect(plane([0, 0, 26.01], "Z"), 17.6, 12.6), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 19.6, 6.6),
-                          rect(plane([0, 12.5, -0.25], [0, 1, 0.5]), 27.6, 0.6)], true);
-        outer - inner
-    "#;
-    fails(script, "the cut removed everything");
 }
 
 #[test]

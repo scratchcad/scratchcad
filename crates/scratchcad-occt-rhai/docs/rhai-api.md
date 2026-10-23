@@ -48,7 +48,7 @@ the script inside `with_cancel` to be able to stop long OpenCASCADE operations; 
 | `polygon(points)`, `polygon(plane, points_2d)`, `polyline(points)` | closed / open wire |
 | `spline(points)`, `spline(points, closed)`, `bezier(points)` | edges |
 | `wire(edges)`, `face(wire)`, `face(outer, holes)`, `compound(shapes)` | assemblies (each hole must lie inside the outline: holes that would split the face are an error) |
-| `fuse_all(shapes)`, `loft(sections)`, `loft(sections, solid)`, `ruled_loft(sections)`, `ruled_loft(sections, solid)` | solids (a smooth loft can swing past unevenly spaced sections; a ruled one joins each to the next with straight lines) |
+| `fuse_all(shapes)`, `loft(sections)`, `loft(sections, solid)`, `ruled_loft(sections)`, `ruled_loft(sections, solid)` | solids (a smooth loft passes through every section exactly, curvature-continuous across each, and stays between each pair however they are spaced; a ruled one joins each to the next with straight lines, creased at each) |
 | `sketch()`, `sketch(plane)` | a `Sketch` (see below) |
 | `vec3(x, y, z)`, `plane(name)`, `plane(origin, normal)`, `plane(origin, normal, x_dir)` | values |
 
@@ -77,7 +77,12 @@ method, which would give a different shape, and nothing invalid is returned.
   with the profile on its first point, square to it.
 * `loft` matches up the sections' vertices first, except for sections that are each one closed
   edge, such as circles, which are joined start to start: `circle(center, normal, r)` starts
-  circles along a path on the same side.
+  circles along a path on the same side. Each point of the sections then follows its own curve
+  from section to section, limited so that it never goes past the sections either side, with its
+  slope and curvature shared at each section, so reflections run on without a kink. Where a
+  section of several edges is smooth (a line running into an arc tangentially), the faces either
+  side stay tangent all along. Arcs and circles are lofted exactly, not approximated. Each section
+  must span a plane: loft straight ones with `ruled_loft`.
 * `shell` uses CadQuery's settings (offset faces intersected with all the others, rounded outer
   corners), and fails where OpenCASCADE returns the solid unchanged.
 * `offset(d)` checks that every edge of the result lies `d` from the outline, so an offset that
@@ -181,8 +186,10 @@ others, such as servers:
 * **Checked booleans.** A boolean can succeed and still return a wrong shape (where faces only
   touch or nearly coincide), which later operations may mangle or drop without an error, leaving
   a final shape that looks fine. So each boolean's result is checked, and the boolean fails with
-  `Error::InvalidArgument` where it is invalid, has a volume no correct result could have, or
-  missed where the shapes meet (a fuse that left overlapping solids separate, a cut that removed
+  `Error::InvalidArgument` where it is invalid, has a volume no correct result could have (a fuse
+  smaller than one of its solids or larger than all of them together, a cut larger than what it
+  cut from or smaller than that less the tool, a common larger than either side), or missed where
+  the shapes meet (a fuse that left overlapping solids separate, a cut that removed
   nothing or everything, a common that found nothing).
 * **Console output.** OpenCASCADE prints to stdout. `set_message_handler(level, |level, text| ..)`
   receives its messages instead; `set_occt_messages(false)` sends only failures, to stderr.

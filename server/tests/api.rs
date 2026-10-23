@@ -259,24 +259,15 @@ async fn validate_warns_about_shapes_without_solids() {
     assert!(w.starts_with("the shape has no solids"), "{w}");
 }
 
-/// A thread fused onto a core whose surface its root edge only touches: the fuse returns an
-/// invalid shape, and the common after it drops it, leaving a valid shape behind.
-/// A thread lofted onto a core whose surface its root edge only touches: the fuse returns an
-/// invalid shape, which used to pass for a valid one.
+/// A duct and its inside, lofted ruled through three sections each, whose thin far ends nearly
+/// coincide: the cut of one from the other "succeeds", but returns an invalid shape, which used
+/// to pass for a valid one.
 const SILENTLY_BROKEN: &str = r#"
-let r_major = 3.0;
-let r_minor = 2.3866;
-let w = 0.4167;
-let section = polygon([[r_minor - 0.3, 0, -w], [r_minor, 0, -w], [r_major, 0, -0.0625],
-                       [r_major, 0, 0.0625], [r_minor, 0, w], [r_minor - 0.3, 0, w]]);
-let sections = [];
-for i in 0..=252 {
-    let t = i.to_float() / 12.0;
-    sections.push(section.rotate_z(t * 360.0).translate([0, 0, t - 1.0]));
-}
-let core = cylinder([0, 0, -0.5], "Z", r_minor, 20.5);
-let threaded = core + loft(sections, true);
-cylinder(1, 1).translate([0, 0, 30]) + (threaded & cylinder(4, 20))
+let outer = ruled_loft([rect(plane([0, 0, 25], "Z"), 20, 15), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 22, 9),
+                        rect(plane([0, 12, 0], [0, 1, 0.5]), 30, 3)], true);
+let inner = ruled_loft([rect(plane([0, 0, 26.01], "Z"), 17.6, 12.6), rect(plane([0, 4, 12.5], [0, 0.3, 1]), 19.6, 6.6),
+                        rect(plane([0, 12.5, -0.25], [0, 1, 0.5]), 27.6, 0.6)], true);
+cylinder(1, 1).translate([0, 0, 30]) + (outer - inner)
 "#;
 
 #[tokio::test]
@@ -294,15 +285,15 @@ async fn booleans_that_return_invalid_shapes_fail() {
         assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "script_error");
         let m = error_message(&r);
         assert!(
-            m.contains("the fuse returned an invalid shape"),
+            m.contains("the cut returned an invalid shape"),
             "{uri}: {m}"
         );
-        assert!(m.contains("(line 13, position 21)"), "{uri}: {m}");
+        assert!(m.contains("(line 6, position 47)"), "{uri}: {m}");
     }
 }
 
 /// A 1/4-20 thumb screw: a lofted thread, then a neck whose radius equals the thread's crest
-/// radius. The shape passes OpenCASCADE's checker, but the neck's cylinder can't be meshed.
+/// radius. The shape passes OpenCASCADE's checker, but the head's end face can't be meshed.
 const UNMESHABLE: &str = r#"
 const pitch = 1.27;
 const r_major = 3.175;
@@ -343,7 +334,7 @@ async fn mesh_failures_say_what_may_have_caused_them() {
         assert_error(&r, StatusCode::UNPROCESSABLE_ENTITY, "mesh_failed");
         let m = error_message(&r);
         assert!(
-            m.contains("could not mesh the cylinder face around (0, 0, 0.8)"),
+            m.contains("could not mesh the plane face around (0, 0, -0.1)"),
             "{uri}: {m}"
         );
         // The shape is valid, so nothing is said about that.
