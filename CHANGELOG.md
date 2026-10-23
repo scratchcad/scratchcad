@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.0](https://github.com/scratchcad/scratchcad/compare/v0.4.0...v0.5.0) (2026-10-23)
+
+
+### Features
+
+* **crates:** add ruled_loft, which joins sections with straight lines ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** index vectors like arrays ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** loft smoothly through sections without bulging past them, creasing or approximating ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+
+
+### Bug Fixes
+
+* **crates:** bounding boxes are tight on trimmed curved faces ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** extrude outlines drawn on a plane to its positive side ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** fail booleans that go wrong silently, at their line in the script ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** fail fillets and chamfers that return an invalid solid ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** fail fuses larger than their parts and cuts that remove more than their tool ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** fail sweeps that come out invalid ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** fillets and chamfers leave out seams and edges between faces that continue each other ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** let the shapes of a compound tool overlap ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** loft long runs of circles, and start circles where lofts through them won't twist ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** name the face a mesh failed on ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** offset open wires into slots, and fail offsets that cross themselves ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** shell rounded boxes, or fail clearly instead of returning the box unchanged ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** sweep with a pipe shell, which neither crashes on changing helices nor gaps at corners ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* fail instead of falling back or approximating ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* measure shapes on a copy, and fail rather than measure them approximately ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **server:** say when a mesh failed because the shape is invalid ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+
+
+### Performance Improvements
+
+* **crates:** fuse_all fuses every shape in one boolean operation ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+* **crates:** measure rigid copies with the split of the shape they were copied from ([47fd327](https://github.com/scratchcad/scratchcad/commit/47fd327eb56df9aa5e47f4657a0333109192d849))
+
 ## [0.4.0](https://github.com/scratchcad/scratchcad/compare/v0.3.0...v0.4.0) (2026-10-19)
 
 

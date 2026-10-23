@@ -17,7 +17,7 @@ MCP server and the editor:
 
 <!-- x-release-please-start-version -->
 ```sh
-git clone --branch v0.4.0 https://github.com/scratchcad/scratchcad.git
+git clone --branch v0.5.0 https://github.com/scratchcad/scratchcad.git
 cd scratchcad
 docker compose up --build        # or `docker compose watch` to reload on edits
 ```
