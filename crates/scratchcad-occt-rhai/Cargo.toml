@@ -2,7 +2,7 @@
 name = "scratchcad-occt-rhai"
 description = "Script the OpenCASCADE CAD kernel with Rhai"
 license = "LGPL-2.1-only"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 repository = "https://github.com/scratchcad/scratchcad"
 readme = "../README.md"
@@ -12,7 +12,7 @@ categories = ["graphics", "science"]
 [dependencies]
 cxx = "1"
 glam = "0.34"
-scratchcad-occt-sys = { version = "0.4.0", path = "../scratchcad-occt-sys" }
+scratchcad-occt-sys = { version = "0.5.0", path = "../scratchcad-occt-sys" }
 rhai = "1.26"
 thiserror = "2"
 
