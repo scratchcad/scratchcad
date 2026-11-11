@@ -1,8 +1,7 @@
-# scratchcad
+ # scratchcad
 
 > [!WARNING]
-> scratchcad is under active development. APIs, tools and script syntax may
-> change without notice, and things may break between commits.
+> scratchcad is no longer being developed or actively receiving security or any other updates please fork it if you would like to use it
 
 scratchcad is a Rust solid modelling API built on the
 [OpenCASCADE](https://dev.opencascade.org) CAD kernel, plus a local MCP server
